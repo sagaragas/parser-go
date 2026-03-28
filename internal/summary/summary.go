@@ -1,20 +1,29 @@
 package summary
 
+import (
+	"fmt"
+	"sort"
+	"time"
+
+	"parsergo/internal/analysis"
+)
+
 // Summary represents the canonical JSON summary output.
-// This is a placeholder that will be expanded with actual fields.
+// This is the single source of truth for analysis results across
+// API responses, browser reports, and benchmark comparisons.
 type Summary struct {
-	// Workload accounting
-	InputBytes   int64 `json:"input_bytes"`
-	TotalLines   int   `json:"total_lines"`
-	MatchedLines int   `json:"matched_lines"`
-	FilteredLines int  `json:"filtered_lines"`
-	RowCount     int   `json:"row_count"`
+	// Workload accounting fields
+	InputBytes    int64 `json:"input_bytes"`
+	TotalLines    int   `json:"total_lines"`
+	MatchedLines  int   `json:"matched_lines"`
+	FilteredLines int   `json:"filtered_lines"`
+	RowCount      int   `json:"row_count"`
 
 	// Core metrics
-	RequestsTotal int64   `json:"requests_total"`
+	RequestsTotal  int64   `json:"requests_total"`
 	RequestsPerSec float64 `json:"requests_per_sec"`
 
-	// Ranked requests (placeholder)
+	// Ranked requests - sorted by count descending, then path ascending for stable ordering
 	RankedRequests []RankedRequest `json:"ranked_requests,omitempty"`
 }
 
@@ -26,18 +35,68 @@ type RankedRequest struct {
 	Percentage float64 `json:"percentage"`
 }
 
-// Compute performs the canonical summary computation.
-// This is a placeholder for the actual implementation.
-func Compute(input []byte) (*Summary, error) {
-	// Placeholder implementation
-	return &Summary{
-		InputBytes:     int64(len(input)),
-		TotalLines:     0,
-		MatchedLines:   0,
-		FilteredLines:  0,
-		RowCount:       0,
-		RequestsTotal:  0,
-		RequestsPerSec: 0,
-		RankedRequests: []RankedRequest{},
-	}, nil
+// Compute performs the canonical summary computation from analysis results.
+// This function is deterministic: identical input produces identical output,
+// including stable ordering of ranked requests.
+func Compute(result *analysis.Result, duration time.Duration) (*Summary, error) {
+	if result == nil {
+		return nil, fmt.Errorf("nil analysis result")
+	}
+
+	sum := &Summary{
+		InputBytes:     result.InputBytes,
+		TotalLines:     result.TotalLines,
+		MatchedLines:   result.Matched,
+		FilteredLines:  result.Filtered,
+		RowCount:       len(result.Records),
+		RequestsTotal:  int64(result.Matched),
+		RankedRequests: make([]RankedRequest, 0),
+	}
+
+	// Calculate requests per second
+	if duration > 0 {
+		sum.RequestsPerSec = float64(sum.RequestsTotal) / duration.Seconds()
+	}
+
+	// Build ranked requests with aggregation
+	type key struct {
+		path   string
+		method string
+	}
+	counts := make(map[key]int64)
+
+	for _, rec := range result.Records {
+		k := key{path: rec.Path, method: rec.Method}
+		counts[k]++
+	}
+
+	// Convert to ranked requests and calculate percentages
+	for k, count := range counts {
+		percentage := 0.0
+		if sum.RequestsTotal > 0 {
+			percentage = float64(count*100) / float64(sum.RequestsTotal)
+		}
+		sum.RankedRequests = append(sum.RankedRequests, RankedRequest{
+			Path:       k.path,
+			Method:     k.method,
+			Count:      count,
+			Percentage: percentage,
+		})
+	}
+
+	// Sort with deterministic ordering:
+	// Primary: count descending (highest first)
+	// Tie-breaker: path ascending (alphabetical, stable)
+	sort.SliceStable(sum.RankedRequests, func(i, j int) bool {
+		if sum.RankedRequests[i].Count != sum.RankedRequests[j].Count {
+			return sum.RankedRequests[i].Count > sum.RankedRequests[j].Count
+		}
+		// Stable tie-break: alphabetical by path, then method
+		if sum.RankedRequests[i].Path != sum.RankedRequests[j].Path {
+			return sum.RankedRequests[i].Path < sum.RankedRequests[j].Path
+		}
+		return sum.RankedRequests[i].Method < sum.RankedRequests[j].Method
+	})
+
+	return sum, nil
 }
