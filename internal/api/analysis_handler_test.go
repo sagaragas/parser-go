@@ -568,7 +568,7 @@ func TestReportRetrieval(t *testing.T) {
 
 // TestReadinessBlocksSubmission tests that unready service rejects submissions (VAL-SVC-002)
 func TestReadinessBlocksSubmission(t *testing.T) {
-	handler, _ := setupTestHandler()
+	handler, store := setupTestHandler()
 	handler.SetReady(false)
 
 	logData := `127.0.0.1 - - [10/Oct/2000:13:55:36 -0700] "GET /test HTTP/1.0" 200 100`
@@ -592,6 +592,12 @@ func TestReadinessBlocksSubmission(t *testing.T) {
 	json.Unmarshal(w.Body.Bytes(), &errResp)
 	if errResp.Code != ErrCodeServiceUnavailable {
 		t.Errorf("expected error code %s, got %s", ErrCodeServiceUnavailable, errResp.Code)
+	}
+	if len(store.List()) != 0 {
+		t.Fatalf("expected no jobs to be created while unready, got %d", len(store.List()))
+	}
+	if strings.Contains(w.Body.String(), `"id"`) {
+		t.Fatalf("expected unready response to omit job id, got %s", w.Body.String())
 	}
 }
 
