@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -12,6 +13,11 @@ import (
 )
 
 func main() {
+	if len(os.Args) < 2 || os.Args[1] != "serve" {
+		fmt.Fprintf(os.Stderr, "Usage: %s serve\n", os.Args[0])
+		os.Exit(1)
+	}
+
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
