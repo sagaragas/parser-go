@@ -441,6 +441,11 @@ func (h *Handler) processJob(jobID, format, profile string, inputData []byte) {
 		return
 	}
 
+	if result.Matched == 0 && result.Malformed > 0 {
+		h.failJob(jobID, "malformed_dataset", "input contained no valid log lines")
+		return
+	}
+
 	// Compute summary
 	sum, err := summary.Compute(result)
 	if err != nil {

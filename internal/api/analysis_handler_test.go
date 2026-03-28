@@ -681,6 +681,102 @@ func TestEndToEndAnalysis(t *testing.T) {
 	}
 }
 
+func TestAllMalformedDatasetFailsTerminally(t *testing.T) {
+	handler, store := setupTestHandler()
+
+	logData := "not a valid combined log line\nstill not a log line"
+
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	part, _ := writer.CreateFormFile("file", "access.log")
+	part.Write([]byte(logData))
+	writer.WriteField("format", "combined")
+	writer.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/analyses", &buf)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	w := httptest.NewRecorder()
+
+	handler.handleAnalyses(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusAccepted, w.Code, w.Body.String())
+	}
+
+	var resp AnalysisResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+
+	var status JobStatusResponse
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		statusReq := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/v1/analyses/%s", resp.ID), nil)
+		statusResp := httptest.NewRecorder()
+		handler.handleAnalysisDetail(statusResp, statusReq)
+
+		if err := json.Unmarshal(statusResp.Body.Bytes(), &status); err != nil {
+			t.Fatalf("failed to unmarshal status response: %v", err)
+		}
+
+		if status.State == string(job.StateFailed) {
+			break
+		}
+		if status.State == string(job.StateSucceeded) {
+			t.Fatalf("expected failed terminal state for all-malformed dataset, got succeeded")
+		}
+
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if status.State != string(job.StateFailed) {
+		t.Fatalf("timed out waiting for failed terminal state, got %s", status.State)
+	}
+	if status.Error == nil {
+		t.Fatal("expected failed job to include an error object")
+	}
+	if status.Error.Code != "malformed_dataset" {
+		t.Fatalf("expected error code malformed_dataset, got %s", status.Error.Code)
+	}
+	if !strings.Contains(status.Error.Message, "no valid log lines") {
+		t.Fatalf("expected sanitized malformed dataset message, got %q", status.Error.Message)
+	}
+	if strings.Contains(status.Error.Message, "/root/") || strings.Contains(status.Error.Message, "/tmp/") {
+		t.Fatalf("expected sanitized error message, got %q", status.Error.Message)
+	}
+
+	stored, ok := store.Get(resp.ID)
+	if !ok {
+		t.Fatal("expected stored job to exist")
+	}
+	if stored.State != job.StateFailed {
+		t.Fatalf("expected stored job state failed, got %s", stored.State)
+	}
+
+	handler.workspacesMu.RLock()
+	ws := handler.workspaces[resp.ID]
+	handler.workspacesMu.RUnlock()
+	if ws != nil && ws.Summary != nil {
+		t.Fatal("expected no summary to be stored for all-malformed dataset")
+	}
+
+	summaryReq := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/v1/analyses/%s/summary", resp.ID), nil)
+	summaryResp := httptest.NewRecorder()
+	handler.handleAnalysisDetail(summaryResp, summaryReq)
+
+	if summaryResp.Code != http.StatusConflict {
+		t.Fatalf("expected summary endpoint status %d, got %d", http.StatusConflict, summaryResp.Code)
+	}
+
+	var errResp APIError
+	if err := json.Unmarshal(summaryResp.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("failed to unmarshal summary error response: %v", err)
+	}
+	if errResp.Code != ErrorCode("malformed_dataset") {
+		t.Fatalf("expected summary error code malformed_dataset, got %s", errResp.Code)
+	}
+}
+
 func TestJobTransitionsPreserveCreatedAt(t *testing.T) {
 	t.Run("successful jobs preserve created_at", func(t *testing.T) {
 		handler, store := setupTestHandler()
