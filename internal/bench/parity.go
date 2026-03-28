@@ -80,6 +80,7 @@ func ValidateFairness(baseline, rewrite ImplementationSpec) FairnessReport {
 		RequiredControls: append([]string(nil), requiredFairnessControls...),
 		Symmetric:        true,
 		Differences:      []string{},
+		Claimable:        false,
 	}
 
 	if baseline.Controls.WarmupIterations < 0 {
@@ -130,6 +131,7 @@ func ValidateFairness(baseline, rewrite ImplementationSpec) FairnessReport {
 	}
 
 	report.Symmetric = len(report.Differences) == 0
+	report.Claimable = report.Symmetric
 	return report
 }
 

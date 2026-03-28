@@ -18,7 +18,7 @@ type publishedEvidence struct {
 	CrossCheckPath string
 }
 
-func publishEvidenceSet(ctx context.Context, prepared *preparedScenario, manifest RunManifest, baseline executionResult, rewrite executionResult, parity ParityReport, aggregate AggregateMetrics, opts RunOptions) (publishedEvidence, error) {
+func publishEvidenceSet(ctx context.Context, prepared *preparedScenario, manifest RunManifest, fairness FairnessReport, baseline executionResult, rewrite executionResult, parity ParityReport, aggregate AggregateMetrics, opts RunOptions) (publishedEvidence, error) {
 	if opts.EvidenceSetDir == "" {
 		return publishedEvidence{}, nil
 	}
@@ -49,6 +49,9 @@ func publishEvidenceSet(ctx context.Context, prepared *preparedScenario, manifes
 
 	sanitizedManifest := sanitizeManifestForPublication(manifest, prepared)
 	if err := writeJSONFile(filepath.Join(bundleDir, "manifest.json"), sanitizedManifest); err != nil {
+		return publishedEvidence{}, err
+	}
+	if err := writeJSONFile(filepath.Join(bundleDir, "fairness.json"), fairness); err != nil {
 		return publishedEvidence{}, err
 	}
 	if err := writeJSONFile(filepath.Join(bundleDir, "baseline", "normalized-summary.json"), baseline.output.Summary); err != nil {
@@ -216,6 +219,7 @@ func sanitizePublishablePath(value string, prepared *preparedScenario) string {
 func validateBundleForPublication(bundleDir string) (BundleValidationReport, error) {
 	required := []string{
 		"manifest.json",
+		"fairness.json",
 		"baseline/normalized-summary.json",
 		"baseline/workload.json",
 		"baseline/metrics.json",

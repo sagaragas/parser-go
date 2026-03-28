@@ -307,6 +307,259 @@ func TestBenchFairnessControlsMustBeSymmetric(t *testing.T) {
 	}
 }
 
+func TestBenchRunRecordsRuntimeFairnessEvidenceAndAlternatingOrder(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	corpusPath := filepath.Join(tempDir, "access.log")
+	if err := os.WriteFile(corpusPath, []byte("synthetic corpus\n"), 0o644); err != nil {
+		t.Fatalf("write corpus: %v", err)
+	}
+
+	normalizationPath := filepath.Join(tempDir, "normalization.json")
+	if err := os.WriteFile(normalizationPath, []byte(`{
+  "id": "canonical-summary-v1",
+  "summary_fields": ["requests_total", "requests_per_sec", "ranked_requests"],
+  "workload_fields": ["input_bytes", "total_lines", "matched_lines", "filtered_lines", "rejected_lines", "row_count"]
+}`), 0o644); err != nil {
+		t.Fatalf("write normalization: %v", err)
+	}
+
+	resultsDir := filepath.Join(tempDir, "results")
+	scenarioPath := filepath.Join(tempDir, "scenario.json")
+	helperCommand := []string{os.Args[0], "-test.run=TestBenchHelperProcess", "--", "write-output", "{{output}}"}
+	scenarioJSON := `{
+  "id": "runtime-fairness",
+  "description": "runtime fairness evidence",
+  "corpus": {
+    "id": "corpus-1",
+    "path": "` + corpusPath + `",
+    "format": "combined",
+    "profile": "default"
+  },
+  "normalization": {
+    "id": "canonical-summary-v1",
+    "path": "` + normalizationPath + `"
+  },
+  "baseline": {
+    "name": "baseline",
+    "command": [` + quoteJSONList(helperCommand) + `],
+    "env": {
+      "GO_WANT_HELPER_PROCESS": "1",
+      "BENCH_HELPER_VARIANT": "matching"
+    },
+    "controls": {
+      "warmup_iterations": 1,
+      "measured_iterations": 2,
+      "cache_posture": "cold",
+      "concurrency": 1,
+      "max_procs": 1
+    }
+  },
+  "rewrite": {
+    "name": "rewrite",
+    "command": [` + quoteJSONList(helperCommand) + `],
+    "env": {
+      "GO_WANT_HELPER_PROCESS": "1",
+      "BENCH_HELPER_VARIANT": "matching"
+    },
+    "controls": {
+      "warmup_iterations": 1,
+      "measured_iterations": 2,
+      "cache_posture": "cold",
+      "concurrency": 1,
+      "max_procs": 1
+    }
+  }
+}`
+	if err := os.WriteFile(scenarioPath, []byte(scenarioJSON), 0o644); err != nil {
+		t.Fatalf("write scenario: %v", err)
+	}
+
+	if _, err := Run(context.Background(), RunOptions{
+		RepoRoot:     tempDir,
+		ScenarioPath: scenarioPath,
+		ResultsDir:   resultsDir,
+	}); err != nil {
+		t.Fatalf("run benchmark: %v", err)
+	}
+
+	manifestData, err := os.ReadFile(filepath.Join(resultsDir, "manifest.json"))
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	var manifest RunManifest
+	if err := json.Unmarshal(manifestData, &manifest); err != nil {
+		t.Fatalf("decode manifest: %v", err)
+	}
+
+	if len(manifest.Fairness.ExecutionSchedule) != 3 {
+		t.Fatalf("expected 3 execution rounds, got %d", len(manifest.Fairness.ExecutionSchedule))
+	}
+
+	sawBaselineFirst := false
+	sawRewriteFirst := false
+	for _, round := range manifest.Fairness.ExecutionSchedule {
+		if len(round.Order) != 2 {
+			t.Fatalf("expected paired order for round %+v", round)
+		}
+		switch round.Order[0] {
+		case "baseline":
+			sawBaselineFirst = true
+		case "rewrite":
+			sawRewriteFirst = true
+		default:
+			t.Fatalf("unexpected first implementation %q", round.Order[0])
+		}
+	}
+	if !sawBaselineFirst || !sawRewriteFirst {
+		t.Fatalf("expected alternating start order, got %+v", manifest.Fairness.ExecutionSchedule)
+	}
+
+	if !manifest.Fairness.Claimable {
+		t.Fatalf("expected fairness to be claimable, got %+v", manifest.Fairness)
+	}
+
+	for _, control := range manifest.Fairness.ControlEvidence {
+		switch control.Control {
+		case "cache_posture", "concurrency", "max_procs":
+			if !control.Claimable {
+				t.Fatalf("expected %s to be claimable, got %+v", control.Control, control)
+			}
+		}
+	}
+
+	for _, name := range []string{"baseline", "rewrite"} {
+		data, err := os.ReadFile(filepath.Join(resultsDir, "metrics", name+".json"))
+		if err != nil {
+			t.Fatalf("read metrics %s: %v", name, err)
+		}
+		var metrics []IterationMetric
+		if err := json.Unmarshal(data, &metrics); err != nil {
+			t.Fatalf("decode metrics %s: %v", name, err)
+		}
+		for _, metric := range metrics {
+			if metric.Fairness.CachePosture != "cold" {
+				t.Fatalf("expected cache posture evidence for %s, got %+v", name, metric.Fairness)
+			}
+			if metric.Fairness.Concurrency != 1 || !metric.Fairness.ConcurrencyVerified {
+				t.Fatalf("expected concurrency evidence for %s, got %+v", name, metric.Fairness)
+			}
+			if metric.Fairness.MaxProcs != 1 || !metric.Fairness.MaxProcsVerified {
+				t.Fatalf("expected max_procs evidence for %s, got %+v", name, metric.Fairness)
+			}
+			if metric.Fairness.Round == 0 || metric.Fairness.PositionInRound == 0 {
+				t.Fatalf("expected round position evidence for %s, got %+v", name, metric.Fairness)
+			}
+		}
+	}
+}
+
+func TestBenchRunBlocksPerformanceClaimsWhenFairnessCannotBeProven(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	corpusPath := filepath.Join(tempDir, "access.log")
+	if err := os.WriteFile(corpusPath, []byte("synthetic corpus\n"), 0o644); err != nil {
+		t.Fatalf("write corpus: %v", err)
+	}
+
+	normalizationPath := filepath.Join(tempDir, "normalization.json")
+	if err := os.WriteFile(normalizationPath, []byte(`{
+  "id": "canonical-summary-v1",
+  "summary_fields": ["requests_total", "requests_per_sec", "ranked_requests"],
+  "workload_fields": ["input_bytes", "total_lines", "matched_lines", "filtered_lines", "rejected_lines", "row_count"]
+}`), 0o644); err != nil {
+		t.Fatalf("write normalization: %v", err)
+	}
+
+	resultsDir := filepath.Join(tempDir, "results")
+	scenarioPath := filepath.Join(tempDir, "scenario.json")
+	helperCommand := []string{os.Args[0], "-test.run=TestBenchHelperProcess", "--", "write-output", "{{output}}"}
+	scenarioJSON := `{
+  "id": "non-claimable-fairness",
+  "description": "unsupported fairness proof",
+  "corpus": {
+    "id": "corpus-1",
+    "path": "` + corpusPath + `",
+    "format": "combined",
+    "profile": "default"
+  },
+  "normalization": {
+    "id": "canonical-summary-v1",
+    "path": "` + normalizationPath + `"
+  },
+  "baseline": {
+    "name": "baseline",
+    "command": [` + quoteJSONList(helperCommand) + `],
+    "env": {
+      "GO_WANT_HELPER_PROCESS": "1",
+      "BENCH_HELPER_VARIANT": "matching"
+    },
+    "controls": {
+      "warmup_iterations": 0,
+      "measured_iterations": 1,
+      "cache_posture": "cold",
+      "concurrency": 2,
+      "max_procs": 1
+    }
+  },
+  "rewrite": {
+    "name": "rewrite",
+    "command": [` + quoteJSONList(helperCommand) + `],
+    "env": {
+      "GO_WANT_HELPER_PROCESS": "1",
+      "BENCH_HELPER_VARIANT": "matching"
+    },
+    "controls": {
+      "warmup_iterations": 0,
+      "measured_iterations": 1,
+      "cache_posture": "cold",
+      "concurrency": 2,
+      "max_procs": 1
+    }
+  }
+}`
+	if err := os.WriteFile(scenarioPath, []byte(scenarioJSON), 0o644); err != nil {
+		t.Fatalf("write scenario: %v", err)
+	}
+
+	if _, err := Run(context.Background(), RunOptions{
+		RepoRoot:     tempDir,
+		ScenarioPath: scenarioPath,
+		ResultsDir:   resultsDir,
+	}); err != nil {
+		t.Fatalf("run benchmark: %v", err)
+	}
+
+	manifestData, err := os.ReadFile(filepath.Join(resultsDir, "manifest.json"))
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	var manifest RunManifest
+	if err := json.Unmarshal(manifestData, &manifest); err != nil {
+		t.Fatalf("decode manifest: %v", err)
+	}
+	if manifest.Fairness.Claimable {
+		t.Fatalf("expected non-claimable fairness, got %+v", manifest.Fairness)
+	}
+
+	parityData, err := os.ReadFile(filepath.Join(resultsDir, "parity.json"))
+	if err != nil {
+		t.Fatalf("read parity: %v", err)
+	}
+	var parity ParityReport
+	if err := json.Unmarshal(parityData, &parity); err != nil {
+		t.Fatalf("decode parity: %v", err)
+	}
+	if parity.Passed != true {
+		t.Fatalf("expected parity to pass, got %+v", parity)
+	}
+	if parity.PerformanceClaimsAllowed {
+		t.Fatalf("expected performance claims to be blocked, got %+v", parity)
+	}
+}
+
 func TestBenchRewriteOutputIncludesRejectedLines(t *testing.T) {
 	t.Parallel()
 

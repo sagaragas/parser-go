@@ -129,6 +129,7 @@ func TestHomelabEvidenceBundleIncludesRedactionAndValidation(t *testing.T) {
 
 	for _, rel := range []string{
 		"manifest.json",
+		"fairness.json",
 		"baseline/normalized-summary.json",
 		"baseline/workload.json",
 		"baseline/metrics.json",

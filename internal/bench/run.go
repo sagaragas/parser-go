@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -65,30 +66,29 @@ func Run(ctx context.Context, opts RunOptions) (*RunResult, error) {
 		return nil, err
 	}
 
+	baselineExecution, rewriteExecution, runtimeFairness, err := runPreparedScenario(ctx, prepared)
+	if err != nil {
+		return nil, err
+	}
+
 	host := collectHostSnapshot(prepared.placeholderContext["go_binary"], prepared.placeholderContext["baseline_python"])
-	manifest, err := buildManifest(prepared, host)
+	manifest, err := buildManifest(prepared, host, runtimeFairness)
 	if err != nil {
 		return nil, err
 	}
 	manifestPath := filepath.Join(resultsDir, "manifest.json")
+	if err := writeJSONFile(filepath.Join(resultsDir, "fairness.json"), runtimeFairness); err != nil {
+		return nil, err
+	}
 	if err := writeJSONFile(manifestPath, manifest); err != nil {
 		return nil, err
 	}
 
-	baselineExecution, baselineErr := runImplementation(ctx, prepared.baseline)
 	if err := writeJSONFile(filepath.Join(resultsDir, "metrics", "baseline.json"), baselineExecution.metrics); err != nil {
 		return nil, err
 	}
-	if baselineErr != nil {
-		return nil, baselineErr
-	}
-
-	rewriteExecution, rewriteErr := runImplementation(ctx, prepared.rewrite)
 	if err := writeJSONFile(filepath.Join(resultsDir, "metrics", "rewrite.json"), rewriteExecution.metrics); err != nil {
 		return nil, err
-	}
-	if rewriteErr != nil {
-		return nil, rewriteErr
 	}
 
 	if err := writeImplementationArtifacts(resultsDir, "baseline", *baselineExecution.output); err != nil {
@@ -99,6 +99,7 @@ func Run(ctx context.Context, opts RunOptions) (*RunResult, error) {
 	}
 
 	parity := CompareOutputs(prepared.rules, *baselineExecution.output, *rewriteExecution.output)
+	parity.PerformanceClaimsAllowed = parity.Passed && runtimeFairness.Claimable
 	parityPath := filepath.Join(resultsDir, "parity.json")
 	if err := writeJSONFile(parityPath, parity); err != nil {
 		return nil, err
@@ -124,7 +125,7 @@ func Run(ctx context.Context, opts RunOptions) (*RunResult, error) {
 		ParityPath:   parityPath,
 	}
 
-	published, err := publishEvidenceSet(ctx, prepared, manifest, baselineExecution, rewriteExecution, parity, aggregate, opts)
+	published, err := publishEvidenceSet(ctx, prepared, manifest, runtimeFairness, baselineExecution, rewriteExecution, parity, aggregate, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -284,7 +285,7 @@ func prepareImplementation(kind string, spec ImplementationSpec, placeholders ma
 	return impl, nil
 }
 
-func buildManifest(prepared *preparedScenario, host HostSnapshot) (RunManifest, error) {
+func buildManifest(prepared *preparedScenario, host HostSnapshot, fairness FairnessReport) (RunManifest, error) {
 	corpusHash, err := sha256File(prepared.corpusPath)
 	if err != nil {
 		return RunManifest{}, err
@@ -332,99 +333,157 @@ func buildManifest(prepared *preparedScenario, host HostSnapshot) (RunManifest, 
 			GitRevision: prepared.rewrite.gitRevision,
 			Controls:    prepared.rewrite.spec.Controls,
 		},
-		Fairness: prepared.fairness,
+		Fairness: fairness,
 	}, nil
 }
 
-func runImplementation(ctx context.Context, impl preparedImplementation) (executionResult, error) {
-	result := executionResult{
-		metrics: make([]IterationMetric, 0, impl.spec.Controls.WarmupIterations+impl.spec.Controls.MeasuredIterations),
+func runPreparedScenario(ctx context.Context, prepared *preparedScenario) (executionResult, executionResult, FairnessReport, error) {
+	baselineResult := executionResult{
+		metrics: make([]IterationMetric, 0, prepared.baseline.spec.Controls.WarmupIterations+prepared.baseline.spec.Controls.MeasuredIterations),
+	}
+	rewriteResult := executionResult{
+		metrics: make([]IterationMetric, 0, prepared.rewrite.spec.Controls.WarmupIterations+prepared.rewrite.spec.Controls.MeasuredIterations),
 	}
 
-	totalIterations := impl.spec.Controls.WarmupIterations + impl.spec.Controls.MeasuredIterations
-	for iteration := 1; iteration <= totalIterations; iteration++ {
+	totalRounds := prepared.baseline.spec.Controls.WarmupIterations + prepared.baseline.spec.Controls.MeasuredIterations
+	schedule := make([]ExecutionRound, 0, totalRounds)
+	for round := 1; round <= totalRounds; round++ {
 		phase := "measured"
-		if iteration <= impl.spec.Controls.WarmupIterations {
+		if round <= prepared.baseline.spec.Controls.WarmupIterations {
 			phase = "warmup"
 		}
+		order := executionOrderForRound(prepared.scenario.ID, round)
+		schedule = append(schedule, ExecutionRound{
+			Round: round,
+			Phase: phase,
+			Order: append([]string(nil), order...),
+		})
 
-		workspace, err := os.MkdirTemp("", "parsergo-bench-"+impl.kind+"-")
-		if err != nil {
-			return result, err
-		}
-
-		outputPath := filepath.Join(workspace, "output.json")
-		placeholders := map[string]string{
-			"workspace": workspace,
-			"output":    outputPath,
-		}
-
-		command, err := expandPlaceholders(impl.command, placeholders)
-		if err != nil {
-			_ = os.RemoveAll(workspace)
-			return result, fmt.Errorf("missing prerequisite: %s %w", impl.kind, err)
-		}
-
-		envPairs, err := expandEnv(impl.env, placeholders)
-		if err != nil {
-			_ = os.RemoveAll(workspace)
-			return result, fmt.Errorf("missing prerequisite: %s %w", impl.kind, err)
-		}
-
-		metric := IterationMetric{
-			Implementation: impl.kind,
-			Phase:          phase,
-			Iteration:      iteration,
-			Status:         "failed",
-			StartedAt:      time.Now().UTC(),
-		}
-
-		var stdout bytes.Buffer
-		var stderr bytes.Buffer
-		cmd := exec.CommandContext(ctx, command[0], command[1:]...)
-		cmd.Dir = impl.workingDir
-		cmd.Env = append(os.Environ(), envPairs...)
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
-
-		start := time.Now()
-		runErr := cmd.Run()
-		metric.FinishedAt = time.Now().UTC()
-		metric.WallMilliseconds = time.Since(start).Seconds() * 1000
-		metric.CPUMilliseconds, metric.MaxRSSKB = processUsage(cmd.ProcessState)
-
-		if runErr != nil {
-			metric.Error = strings.TrimSpace(strings.TrimSpace(stderr.String() + "\n" + stdout.String()))
-			if metric.Error == "" {
-				metric.Error = runErr.Error()
+		for position, kind := range order {
+			var impl preparedImplementation
+			var destination *executionResult
+			if kind == "baseline" {
+				impl = prepared.baseline
+				destination = &baselineResult
+			} else {
+				impl = prepared.rewrite
+				destination = &rewriteResult
 			}
-			result.metrics = append(result.metrics, metric)
-			_ = os.RemoveAll(workspace)
-			return result, fmt.Errorf("%s iteration %d failed: %s", impl.kind, iteration, metric.Error)
-		}
 
-		var output ImplementationOutput
-		if err := readJSONFile(outputPath, &output); err != nil {
-			metric.Error = err.Error()
-			result.metrics = append(result.metrics, metric)
-			_ = os.RemoveAll(workspace)
-			return result, fmt.Errorf("%s iteration %d did not produce readable output: %w", impl.kind, iteration, err)
+			metric, output, err := runImplementationIteration(ctx, prepared, impl, phase, round, position+1, order)
+			destination.metrics = append(destination.metrics, metric)
+			if err != nil {
+				return baselineResult, rewriteResult, FairnessReport{}, fmt.Errorf("%s iteration %d failed: %w", impl.kind, round, err)
+			}
+			if phase == "measured" && destination.output == nil {
+				copied := *output
+				destination.output = &copied
+			}
 		}
-
-		metric.Status = "succeeded"
-		result.metrics = append(result.metrics, metric)
-		if phase == "measured" && result.output == nil {
-			copied := output
-			result.output = &copied
-		}
-
-		_ = os.RemoveAll(workspace)
 	}
 
-	if result.output == nil {
-		return result, fmt.Errorf("%s produced no measured output", impl.kind)
+	if baselineResult.output == nil {
+		return baselineResult, rewriteResult, FairnessReport{}, fmt.Errorf("baseline produced no measured output")
 	}
-	return result, nil
+	if rewriteResult.output == nil {
+		return baselineResult, rewriteResult, FairnessReport{}, fmt.Errorf("rewrite produced no measured output")
+	}
+
+	fairness := fairnessFromExecution(prepared.fairness, prepared.baseline, prepared.rewrite, baselineResult.metrics, rewriteResult.metrics, schedule)
+	return baselineResult, rewriteResult, fairness, nil
+}
+
+func runImplementationIteration(ctx context.Context, prepared *preparedScenario, impl preparedImplementation, phase string, iteration int, position int, order []string) (IterationMetric, *ImplementationOutput, error) {
+	workspace, err := os.MkdirTemp("", "parsergo-bench-"+impl.kind+"-")
+	if err != nil {
+		return IterationMetric{}, nil, err
+	}
+	defer os.RemoveAll(workspace)
+
+	outputPath := filepath.Join(workspace, "output.json")
+	placeholders := map[string]string{
+		"workspace": workspace,
+		"output":    outputPath,
+	}
+
+	command, err := expandPlaceholders(impl.command, placeholders)
+	if err != nil {
+		return IterationMetric{}, nil, fmt.Errorf("missing prerequisite: %w", err)
+	}
+
+	envPairs, err := expandEnv(impl.env, placeholders)
+	if err != nil {
+		return IterationMetric{}, nil, fmt.Errorf("missing prerequisite: %w", err)
+	}
+
+	cacheAction, cacheVerified, cacheNotes := applyCachePosture(prepared.corpusPath, impl.spec.Controls.CachePosture)
+	command, cpuSet, maxProcsVerified, maxProcsNotes := applyMaxProcs(command, impl.spec.Controls)
+	envOverrides := runtimeEnvOverrides(impl.kind, impl.spec.Controls)
+	for key, value := range envOverrides {
+		envPairs = append(envPairs, fmt.Sprintf("%s=%s", key, value))
+	}
+
+	concurrencyVerified := impl.spec.Controls.Concurrency == 1
+	concurrencyNotes := []string{fmt.Sprintf("serialized paired execution recorded for round %d", iteration)}
+	if !concurrencyVerified {
+		concurrencyNotes = append(concurrencyNotes, fmt.Sprintf("declared concurrency %d cannot be proven by the serialized harness", impl.spec.Controls.Concurrency))
+	}
+
+	metric := IterationMetric{
+		Implementation: impl.kind,
+		Phase:          phase,
+		Iteration:      iteration,
+		Status:         "failed",
+		StartedAt:      time.Now().UTC(),
+		Fairness: IterationFairnessEvidence{
+			Round:               iteration,
+			PositionInRound:     position,
+			Order:               append([]string(nil), order...),
+			CachePosture:        impl.spec.Controls.CachePosture,
+			CacheAction:         cacheAction,
+			CacheVerified:       cacheVerified,
+			CacheDetails:        dedupeStrings(cacheNotes),
+			Concurrency:         impl.spec.Controls.Concurrency,
+			ConcurrencyVerified: concurrencyVerified,
+			ConcurrencyDetails:  dedupeStrings(concurrencyNotes),
+			MaxProcs:            impl.spec.Controls.MaxProcs,
+			MaxProcsVerified:    maxProcsVerified,
+			CPUSet:              cpuSet,
+			MaxProcsDetails:     dedupeStrings(maxProcsNotes),
+			EnvOverrides:        envOverrides,
+		},
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
+	cmd.Dir = impl.workingDir
+	cmd.Env = append(os.Environ(), envPairs...)
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	start := time.Now()
+	runErr := cmd.Run()
+	metric.FinishedAt = time.Now().UTC()
+	metric.WallMilliseconds = time.Since(start).Seconds() * 1000
+	metric.CPUMilliseconds, metric.MaxRSSKB = processUsage(cmd.ProcessState)
+
+	if runErr != nil {
+		metric.Error = strings.TrimSpace(strings.TrimSpace(stderr.String() + "\n" + stdout.String()))
+		if metric.Error == "" {
+			metric.Error = runErr.Error()
+		}
+		return metric, nil, errors.New(metric.Error)
+	}
+
+	var output ImplementationOutput
+	if err := readJSONFile(outputPath, &output); err != nil {
+		metric.Error = err.Error()
+		return metric, nil, fmt.Errorf("did not produce readable output: %w", err)
+	}
+
+	metric.Status = "succeeded"
+	return metric, &output, nil
 }
 
 func summarizeMetrics(controls RuntimeControls, metrics []IterationMetric) ImplementationAggregate {

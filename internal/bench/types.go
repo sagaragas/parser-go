@@ -116,9 +116,55 @@ type ParityReport struct {
 
 // FairnessReport records required controls and any asymmetry.
 type FairnessReport struct {
-	RequiredControls []string `json:"required_controls"`
-	Symmetric        bool     `json:"symmetric"`
-	Differences      []string `json:"differences"`
+	RequiredControls  []string                  `json:"required_controls"`
+	Symmetric         bool                      `json:"symmetric"`
+	Differences       []string                  `json:"differences"`
+	Claimable         bool                      `json:"claimable"`
+	ControlEvidence   []FairnessControlEvidence `json:"control_evidence,omitempty"`
+	ExecutionSchedule []ExecutionRound          `json:"execution_schedule,omitempty"`
+}
+
+// FairnessControlEvidence records how one fairness control was applied or proven.
+type FairnessControlEvidence struct {
+	Control   string              `json:"control"`
+	Baseline  FairnessControlSide `json:"baseline"`
+	Rewrite   FairnessControlSide `json:"rewrite"`
+	Symmetric bool                `json:"symmetric"`
+	Claimable bool                `json:"claimable"`
+}
+
+// FairnessControlSide records one implementation's fairness evidence for a control.
+type FairnessControlSide struct {
+	Declared string   `json:"declared"`
+	Applied  string   `json:"applied"`
+	Verified bool     `json:"verified"`
+	Details  []string `json:"details,omitempty"`
+}
+
+// ExecutionRound records the paired execution order for one round.
+type ExecutionRound struct {
+	Round int      `json:"round"`
+	Phase string   `json:"phase"`
+	Order []string `json:"order"`
+}
+
+// IterationFairnessEvidence records applied fairness controls for one iteration.
+type IterationFairnessEvidence struct {
+	Round               int               `json:"round"`
+	PositionInRound     int               `json:"position_in_round"`
+	Order               []string          `json:"order"`
+	CachePosture        string            `json:"cache_posture"`
+	CacheAction         string            `json:"cache_action,omitempty"`
+	CacheVerified       bool              `json:"cache_verified"`
+	CacheDetails        []string          `json:"cache_details,omitempty"`
+	Concurrency         int               `json:"concurrency"`
+	ConcurrencyVerified bool              `json:"concurrency_verified"`
+	ConcurrencyDetails  []string          `json:"concurrency_details,omitempty"`
+	MaxProcs            int               `json:"max_procs"`
+	MaxProcsVerified    bool              `json:"max_procs_verified"`
+	CPUSet              string            `json:"cpu_set,omitempty"`
+	MaxProcsDetails     []string          `json:"max_procs_details,omitempty"`
+	EnvOverrides        map[string]string `json:"env_overrides,omitempty"`
 }
 
 // RunManifest records the reproducibility details for one scenario run.
@@ -175,16 +221,17 @@ type HostSnapshot struct {
 
 // IterationMetric records one iteration's resource usage.
 type IterationMetric struct {
-	Implementation   string    `json:"implementation"`
-	Phase            string    `json:"phase"`
-	Iteration        int       `json:"iteration"`
-	Status           string    `json:"status"`
-	StartedAt        time.Time `json:"started_at"`
-	FinishedAt       time.Time `json:"finished_at"`
-	WallMilliseconds float64   `json:"wall_ms"`
-	CPUMilliseconds  float64   `json:"cpu_ms"`
-	MaxRSSKB         int64     `json:"max_rss_kb"`
-	Error            string    `json:"error,omitempty"`
+	Implementation   string                    `json:"implementation"`
+	Phase            string                    `json:"phase"`
+	Iteration        int                       `json:"iteration"`
+	Status           string                    `json:"status"`
+	StartedAt        time.Time                 `json:"started_at"`
+	FinishedAt       time.Time                 `json:"finished_at"`
+	WallMilliseconds float64                   `json:"wall_ms"`
+	CPUMilliseconds  float64                   `json:"cpu_ms"`
+	MaxRSSKB         int64                     `json:"max_rss_kb"`
+	Fairness         IterationFairnessEvidence `json:"fairness"`
+	Error            string                    `json:"error,omitempty"`
 }
 
 // AggregateMetrics summarizes the measured iterations for both implementations.
