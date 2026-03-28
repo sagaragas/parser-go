@@ -1,0 +1,5 @@
+# Evidence bundles are added intentionally, but we ignore any temp files
+*.tmp
+*.temp
+*.log
+.DS_Store

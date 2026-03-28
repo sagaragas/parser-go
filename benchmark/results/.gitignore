@@ -1,0 +1,3 @@
+# Benchmark results are runtime artifacts, not committed source
+*
+!.gitignore

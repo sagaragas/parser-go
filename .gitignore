@@ -35,12 +35,24 @@ Thumbs.db
 /benchmark-output
 *.log
 
+# Benchmark results directory (runtime artifacts only)
+/benchmark/results/*
+!/benchmark/results/.gitignore
+
+# Evidence temp files
+/evidence/*.tmp
+/evidence/*.temp
+/evidence/*.log
+
 # Coverage
 *.cover
 coverage.out
 
 # Go vendor (if used)
 /vendor
+
+# Local toolchain (installed by .factory/init.sh)
+/.tools/
 
 # Keep .factory - it's mission infrastructure
 !.factory/
