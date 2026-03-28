@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -625,6 +626,175 @@ func TestReportDetailIncludesInlineCharts(t *testing.T) {
 	}
 }
 
+func TestReportDetailAppliesTopRequestCapAndPreservesOrder(t *testing.T) {
+	handler, analysisHandler, store := setupReportHandler()
+
+	jobID := "test_large_ranked_report"
+	store.Create(&job.Job{
+		ID:        jobID,
+		State:     job.StateSucceeded,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	})
+
+	ranked := make([]summary.RankedRequest, 0, 55)
+	for i := 0; i < 55; i++ {
+		ranked = append(ranked, summary.RankedRequest{
+			Path:       fmt.Sprintf("/requests/%02d", i+1),
+			Method:     "GET",
+			Count:      int64(500 - i),
+			Percentage: 1.0,
+		})
+	}
+
+	analysisHandler.workspacesMu.Lock()
+	analysisHandler.workspaces[jobID] = &Workspace{
+		ID:    jobID,
+		JobID: jobID,
+		Summary: &summary.Summary{
+			RequestsTotal:  500,
+			RequestsPerSec: 25,
+			TotalLines:     500,
+			MatchedLines:   500,
+			RowCount:       len(ranked),
+			InputBytes:     8192,
+			RankedRequests: ranked,
+		},
+	}
+	analysisHandler.workspacesMu.Unlock()
+
+	req := httptest.NewRequest(http.MethodGet, "/reports/"+jobID, nil)
+	w := httptest.NewRecorder()
+
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux)
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "Top-request table cap: 50 rows. Showing 50 of 55 ranked rows.") {
+		t.Fatalf("expected visible top-request cap note, got body: %s", body)
+	}
+	if strings.Contains(body, "/requests/51") {
+		t.Fatalf("expected ranked request rows beyond the visible cap to be omitted, got body: %s", body)
+	}
+
+	first := strings.Index(body, "/requests/01")
+	second := strings.Index(body, "/requests/02")
+	third := strings.Index(body, "/requests/03")
+	if first == -1 || second == -1 || third == -1 {
+		t.Fatalf("expected first ranked paths to appear in report body, got body: %s", body)
+	}
+	if !(first < second && second < third) {
+		t.Fatalf("expected ranked request rows to preserve summary order, got positions %d, %d, %d", first, second, third)
+	}
+}
+
+func TestReportDetailShowsOptionalDatasetStates(t *testing.T) {
+	handler, analysisHandler, store := setupReportHandler()
+
+	jobID := "test_optional_dataset_states"
+	store.Create(&job.Job{
+		ID:        jobID,
+		State:     job.StateSucceeded,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	})
+
+	analysisHandler.workspacesMu.Lock()
+	analysisHandler.workspaces[jobID] = &Workspace{
+		ID:    jobID,
+		JobID: jobID,
+		Summary: &summary.Summary{
+			RequestsTotal:  24,
+			RequestsPerSec: 12,
+			TotalLines:     24,
+			MatchedLines:   24,
+			RowCount:       2,
+			InputBytes:     1536,
+			RankedRequests: []summary.RankedRequest{
+				{Path: "/alpha", Method: "GET", Count: 12, Percentage: 50},
+				{Path: "/beta", Method: "GET", Count: 12, Percentage: 50},
+			},
+		},
+	}
+	analysisHandler.workspacesMu.Unlock()
+
+	req := httptest.NewRequest(http.MethodGet, "/reports/"+jobID, nil)
+	w := httptest.NewRecorder()
+
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux)
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "Optional Datasets") {
+		t.Fatalf("expected optional datasets section, got body: %s", body)
+	}
+	if !strings.Contains(body, "Latency breakdown unavailable") {
+		t.Fatalf("expected latency unavailable state, got body: %s", body)
+	}
+	if !strings.Contains(body, "Per-second request chart disabled") {
+		t.Fatalf("expected per-second disabled state, got body: %s", body)
+	}
+}
+
+func TestReportDetailUsesBoundedOverflowLayout(t *testing.T) {
+	handler, analysisHandler, store := setupReportHandler()
+
+	jobID := "test_overflow_layout"
+	store.Create(&job.Job{
+		ID:        jobID,
+		State:     job.StateSucceeded,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	})
+
+	analysisHandler.workspacesMu.Lock()
+	analysisHandler.workspaces[jobID] = &Workspace{
+		ID:    jobID,
+		JobID: jobID,
+		Summary: &summary.Summary{
+			RequestsTotal:  1,
+			RequestsPerSec: 1,
+			TotalLines:     1,
+			MatchedLines:   1,
+			RowCount:       1,
+			InputBytes:     512,
+			RankedRequests: []summary.RankedRequest{
+				{Path: "/" + strings.Repeat("very-long-path-segment-", 12), Method: "GET", Count: 1, Percentage: 100},
+			},
+		},
+	}
+	analysisHandler.workspacesMu.Unlock()
+
+	req := httptest.NewRequest(http.MethodGet, "/reports/"+jobID, nil)
+	w := httptest.NewRecorder()
+
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux)
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "overflow-x: hidden") {
+		t.Fatalf("expected page-level horizontal overflow protection, got body: %s", body)
+	}
+	if !strings.Contains(body, "top-requests-table-wrap") || !strings.Contains(body, "overflow-x: auto") {
+		t.Fatalf("expected local overflow container for ranked request table, got body: %s", body)
+	}
+}
+
 // TestReportDetailSafeRendering tests HTML escaping in report (VAL-RPT-010)
 func TestReportDetailSafeRendering(t *testing.T) {
 	handler, analysisHandler, store := setupReportHandler()
@@ -682,6 +852,12 @@ func TestReportDetailSafeRendering(t *testing.T) {
 	if strings.Contains(body, `onerror=alert`) && !strings.Contains(body, `&quot;`) && !strings.Contains(body, `&#34;`) {
 		t.Error("unescaped event handler found in output")
 	}
+}
+
+func TestReportUX(t *testing.T) {
+	t.Run("TopRequestCapAndOrder", TestReportDetailAppliesTopRequestCapAndPreservesOrder)
+	t.Run("OptionalDatasetStates", TestReportDetailShowsOptionalDatasetStates)
+	t.Run("BoundedOverflowLayout", TestReportDetailUsesBoundedOverflowLayout)
 }
 
 // TestReportsIndexMethodNotAllowed tests that non-GET methods are rejected

@@ -26,6 +26,11 @@ type ReportIndexItem struct {
 	State     string    `json:"state"`
 }
 
+const (
+	visibleTopRequestRowLimit = 50
+	topRequestChartLimit      = 6
+)
+
 // NewReportHandler creates a new report handler.
 func NewReportHandler(analysisHandler *Handler, logger *slog.Logger) *ReportHandler {
 	return &ReportHandler{
@@ -287,6 +292,7 @@ func (h *ReportHandler) generateReportDetailHTML(jobID string, sum *summary.Summ
 	if sum.RequestsPerSec > 0 {
 		duration = time.Duration(float64(time.Second) * float64(sum.RequestsTotal) / sum.RequestsPerSec)
 	}
+	visibleRankedRequests := limitRankedRequests(sum.RankedRequests, visibleTopRequestRowLimit)
 
 	html := `<!DOCTYPE html>
 <html lang="en">
@@ -304,6 +310,7 @@ func (h *ReportHandler) generateReportDetailHTML(jobID string, sum *summary.Summ
             margin: 0 auto;
             padding: 20px;
             background: #f8f9fa;
+            overflow-x: hidden;
         }
         h1 {
             color: #2c3e50;
@@ -327,6 +334,7 @@ func (h *ReportHandler) generateReportDetailHTML(jobID string, sum *summary.Summ
             border-radius: 8px;
             padding: 25px;
             margin-bottom: 30px;
+            overflow: hidden;
         }
         .summary-title {
             font-size: 1.2em;
@@ -401,6 +409,7 @@ func (h *ReportHandler) generateReportDetailHTML(jobID string, sum *summary.Summ
             border-radius: 8px;
             padding: 25px;
             margin-bottom: 30px;
+            overflow: hidden;
         }
         .charts-grid {
             display: grid;
@@ -413,6 +422,7 @@ func (h *ReportHandler) generateReportDetailHTML(jobID string, sum *summary.Summ
             border: 1px solid #ddd;
             border-radius: 8px;
             padding: 25px;
+            overflow: hidden;
         }
         .chart-title {
             font-size: 1.1em;
@@ -470,16 +480,74 @@ func (h *ReportHandler) generateReportDetailHTML(jobID string, sum *summary.Summ
             color: #64748b;
             font-size: 0.85em;
         }
+        .optional-datasets-section {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 25px;
+            margin-bottom: 30px;
+            overflow: hidden;
+        }
+        .optional-datasets-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 16px;
+        }
+        .optional-dataset-card {
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 18px;
+            background: #f8fafc;
+        }
+        .optional-dataset-label {
+            font-size: 1em;
+            color: #1e293b;
+            margin: 0 0 10px;
+        }
+        .optional-dataset-status {
+            display: inline-block;
+            margin-bottom: 10px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 0.78em;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+        .dataset-state-unavailable {
+            background: #fee2e2;
+            color: #b91c1c;
+        }
+        .dataset-state-disabled {
+            background: #e0f2fe;
+            color: #0369a1;
+        }
+        .optional-dataset-note {
+            margin: 0;
+            color: #475569;
+            font-size: 0.92em;
+        }
         .top-requests-title {
             font-size: 1.2em;
             color: #2c3e50;
             margin-top: 0;
-            margin-bottom: 20px;
+            margin-bottom: 10px;
+        }
+        .top-requests-help {
+            color: #64748b;
+            font-size: 0.9em;
+            margin-top: 0;
+            margin-bottom: 18px;
+        }
+        .top-requests-table-wrap {
+            max-width: 100%;
+            overflow-x: auto;
         }
         table {
             width: 100%;
             border-collapse: collapse;
             font-size: 0.95em;
+            min-width: 640px;
         }
         th, td {
             text-align: left;
@@ -529,7 +597,8 @@ func (h *ReportHandler) generateReportDetailHTML(jobID string, sum *summary.Summ
             font-family: "SF Mono", Monaco, Inconsolata, monospace;
             font-size: 0.9em;
             color: #444;
-            word-break: break-all;
+            overflow-wrap: anywhere;
+            word-break: break-word;
         }
         .no-data {
             color: #999;
@@ -623,16 +692,19 @@ func (h *ReportHandler) generateReportDetailHTML(jobID string, sum *summary.Summ
     </div>
 
     ` + generateChartsHTML(sum) + `
+    ` + generateOptionalDatasetsHTML() + `
 
     <div class="top-requests-section">
         <h2 class="top-requests-title">Top Requests by Frequency</h2>
+        <p class="top-requests-help">` + escapeHTML(topRequestCapMessage(len(sum.RankedRequests), len(visibleRankedRequests), visibleTopRequestRowLimit)) + `</p>
 `
 
 	if len(sum.RankedRequests) == 0 {
 		html += `        <p class="no-data">No request data available for this analysis.</p>
 `
 	} else {
-		html += `        <table>
+		html += `        <div class="top-requests-table-wrap">
+        <table>
             <thead>
                 <tr>
                     <th class="rank">Rank</th>
@@ -644,7 +716,7 @@ func (h *ReportHandler) generateReportDetailHTML(jobID string, sum *summary.Summ
             </thead>
             <tbody>
 `
-		for i, req := range sum.RankedRequests {
+		for i, req := range visibleRankedRequests {
 			methodClass := "method-other"
 			switch req.Method {
 			case "GET":
@@ -668,6 +740,7 @@ func (h *ReportHandler) generateReportDetailHTML(jobID string, sum *summary.Summ
 		}
 		html += `            </tbody>
         </table>
+</div>
 `
 	}
 
@@ -763,10 +836,7 @@ func renderTopRequestsChart(sum *summary.Summary) string {
 		return `<p class="no-data">No ranked request data is available for chart rendering.</p>`
 	}
 
-	ranked := sum.RankedRequests
-	if len(ranked) > 6 {
-		ranked = ranked[:6]
-	}
+	ranked := limitRankedRequests(sum.RankedRequests, topRequestChartLimit)
 
 	maxCount := ranked[0].Count
 	if maxCount <= 0 {
@@ -806,6 +876,25 @@ func renderTopRequestsChart(sum *summary.Summary) string {
 	builder.WriteString(`</svg>`)
 	builder.WriteString(fmt.Sprintf(`<p class="chart-note">Showing the top %d ranked request rows from %d total.</p>`, len(ranked), len(sum.RankedRequests)))
 	return builder.String()
+}
+
+func generateOptionalDatasetsHTML() string {
+	return `    <section class="optional-datasets-section" aria-labelledby="optional-datasets-title">
+        <h2 id="optional-datasets-title" class="top-requests-title">Optional Datasets</h2>
+        <div class="optional-datasets-grid">
+            <article class="optional-dataset-card">
+                <h3 class="optional-dataset-label">Latency breakdown unavailable</h3>
+                <span class="optional-dataset-status dataset-state-unavailable">Unavailable</span>
+                <p class="optional-dataset-note">This report input does not include per-request latency data, so no latency distribution can be rendered.</p>
+            </article>
+            <article class="optional-dataset-card">
+                <h3 class="optional-dataset-label">Per-second request chart disabled</h3>
+                <span class="optional-dataset-status dataset-state-disabled">Disabled</span>
+                <p class="optional-dataset-note">This self-contained report includes aggregate rate metrics only and does not embed per-second request buckets.</p>
+            </article>
+        </div>
+    </section>
+`
 }
 
 func renderLineBreakdownChart(sum *summary.Summary) string {
@@ -897,6 +986,23 @@ func truncateLabel(value string, maxRunes int) string {
 		return "…"
 	}
 	return string(runes[:maxRunes-1]) + "…"
+}
+
+func limitRankedRequests(ranked []summary.RankedRequest, limit int) []summary.RankedRequest {
+	if limit <= 0 || len(ranked) <= limit {
+		return ranked
+	}
+	return ranked[:limit]
+}
+
+func topRequestCapMessage(total, visible, cap int) string {
+	if total == 0 {
+		return fmt.Sprintf("Top-request table cap: %d rows. No ranked request rows are available for this report.", cap)
+	}
+	if total > cap {
+		return fmt.Sprintf("Top-request table cap: %d rows. Showing %d of %d ranked rows.", cap, visible, total)
+	}
+	return fmt.Sprintf("Top-request table cap: %d rows. Showing all %d ranked rows.", cap, visible)
 }
 
 // writeNotReadyReport writes a readable error for reports not yet ready.
