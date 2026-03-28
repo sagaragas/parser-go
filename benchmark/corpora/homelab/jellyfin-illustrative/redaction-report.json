@@ -1,0 +1,32 @@
+{
+  "source_kind": "jellyfin-request-errors",
+  "source_label": "homelab-media-service",
+  "representation": "illustrative",
+  "capture_window": "2026-03-27T22:35:03-07:00/2026-03-27T22:41:23-07:00",
+  "line_count_before": 18,
+  "line_count_after": 18,
+  "structure_preserved": true,
+  "transformations": [
+    {
+      "kind": "host_prefix_removed",
+      "count": 18
+    },
+    {
+      "kind": "client_ip_pseudonymized",
+      "count": 18,
+      "details": "Raw client addresses were replaced with RFC 5737 documentation IPs."
+    },
+    {
+      "kind": "path_token_pseudonymized",
+      "count": 18,
+      "details": "Raw media identifiers were rewritten to session-a and session-b while preserving request frequency."
+    },
+    {
+      "kind": "combined_log_projection",
+      "count": 18,
+      "details": "Request method, path, and bounded timestamps were projected into parser-compatible combined-log lines."
+    }
+  ],
+  "forbidden_matches": [],
+  "notes": "The publishable corpus is derived from a bounded Jellyfin homelab request-error window and contains only anonymized combined-log lines."
+}

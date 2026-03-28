@@ -34,6 +34,7 @@ Thumbs.db
 # Benchmark outputs (may contain sensitive data)
 /benchmark-output
 *.log
+!/benchmark/corpora/**/*.log
 
 # Benchmark results directory (runtime artifacts only)
 /benchmark/results/*

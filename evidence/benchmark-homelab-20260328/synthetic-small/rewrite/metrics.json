@@ -1,0 +1,35 @@
+[
+  {
+    "implementation": "rewrite",
+    "phase": "warmup",
+    "iteration": 1,
+    "status": "succeeded",
+    "started_at": "2026-03-28T23:35:02.937105527Z",
+    "finished_at": "2026-03-28T23:35:02.975651224Z",
+    "wall_ms": 38.544494,
+    "cpu_ms": 164.499,
+    "max_rss_kb": 29864
+  },
+  {
+    "implementation": "rewrite",
+    "phase": "measured",
+    "iteration": 2,
+    "status": "succeeded",
+    "started_at": "2026-03-28T23:35:02.975762152Z",
+    "finished_at": "2026-03-28T23:35:03.013471337Z",
+    "wall_ms": 37.707524,
+    "cpu_ms": 164.549,
+    "max_rss_kb": 28472
+  },
+  {
+    "implementation": "rewrite",
+    "phase": "measured",
+    "iteration": 3,
+    "status": "succeeded",
+    "started_at": "2026-03-28T23:35:03.013580826Z",
+    "finished_at": "2026-03-28T23:35:03.052411113Z",
+    "wall_ms": 38.828388,
+    "cpu_ms": 168.276,
+    "max_rss_kb": 29808
+  }
+]

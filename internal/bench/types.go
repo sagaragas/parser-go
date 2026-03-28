@@ -6,10 +6,22 @@ import "time"
 type Scenario struct {
 	ID            string             `json:"id"`
 	Description   string             `json:"description"`
+	Kind          string             `json:"kind,omitempty"`
 	Corpus        CorpusSpec         `json:"corpus"`
 	Normalization NormalizationSpec  `json:"normalization"`
+	Evidence      EvidenceSpec       `json:"evidence,omitempty"`
 	Baseline      ImplementationSpec `json:"baseline"`
 	Rewrite       ImplementationSpec `json:"rewrite"`
+}
+
+// EvidenceSpec defines publishable-evidence metadata for a scenario.
+type EvidenceSpec struct {
+	Publishable         bool   `json:"publishable,omitempty"`
+	Representation      string `json:"representation,omitempty"`
+	CaptureWindow       string `json:"capture_window,omitempty"`
+	TrafficMixSummary   string `json:"traffic_mix_summary,omitempty"`
+	SourceLabel         string `json:"source_label,omitempty"`
+	RedactionReportPath string `json:"redaction_report_path,omitempty"`
 }
 
 // CorpusSpec defines the benchmark input corpus.
@@ -211,11 +223,82 @@ type RunOptions struct {
 	ScenarioPath   string
 	ResultsDir     string
 	BaselinePython string
+	EvidenceSetDir string
+	ServiceBaseURL string
 }
 
 // RunResult points at the generated bundle.
 type RunResult struct {
-	ResultsDir   string
-	ManifestPath string
-	ParityPath   string
+	ResultsDir         string
+	ManifestPath       string
+	ParityPath         string
+	PublishedBundleDir string
+	EvidenceIndexPath  string
+	CrossCheckPath     string
+}
+
+// EvidenceIndex records the publishable evidence set contents.
+type EvidenceIndex struct {
+	GeneratedAt time.Time               `json:"generated_at"`
+	Scenarios   []EvidenceScenarioEntry `json:"scenarios"`
+}
+
+// EvidenceScenarioEntry describes one published scenario bundle.
+type EvidenceScenarioEntry struct {
+	ScenarioID         string    `json:"scenario_id"`
+	Kind               string    `json:"kind"`
+	Representation     string    `json:"representation,omitempty"`
+	BundlePath         string    `json:"bundle_path"`
+	ParityPassed       bool      `json:"parity_passed"`
+	CorpusSHA256       string    `json:"corpus_sha256"`
+	CaptureWindow      string    `json:"capture_window,omitempty"`
+	TrafficMixSummary  string    `json:"traffic_mix_summary,omitempty"`
+	HasRedactionReport bool      `json:"has_redaction_report"`
+	UpdatedAt          time.Time `json:"updated_at"`
+}
+
+// BundleValidationReport records publishable-bundle validation results.
+type BundleValidationReport struct {
+	Passed           bool             `json:"passed"`
+	RequiredMembers  []string         `json:"required_members"`
+	MissingMembers   []string         `json:"missing_members,omitempty"`
+	ForbiddenMatches []ForbiddenMatch `json:"forbidden_matches,omitempty"`
+}
+
+// ForbiddenMatch describes one forbidden marker found in a publishable bundle.
+type ForbiddenMatch struct {
+	Path    string `json:"path"`
+	Pattern string `json:"pattern"`
+	Snippet string `json:"snippet"`
+}
+
+// RedactionScanReport records the publishable-safe scan of a sanitized corpus.
+type RedactionScanReport struct {
+	ScannedPath      string           `json:"scanned_path"`
+	Passed           bool             `json:"passed"`
+	ForbiddenMatches []ForbiddenMatch `json:"forbidden_matches"`
+}
+
+// CrossCheckReport records same-run service/report/benchmark parity for one scenario.
+type CrossCheckReport struct {
+	ScenarioID            string               `json:"scenario_id"`
+	CorpusSHA256          string               `json:"corpus_sha256"`
+	JobID                 string               `json:"job_id"`
+	SubmissionLocation    string               `json:"submission_location"`
+	ReportURL             string               `json:"report_url"`
+	Benchmark             ImplementationOutput `json:"benchmark"`
+	Service               ImplementationOutput `json:"service"`
+	VisibleMetrics        VisibleReportMetrics `json:"visible_metrics"`
+	VisibleRankedRequests []RankedRequest      `json:"visible_ranked_requests"`
+	Matches               bool                 `json:"matches"`
+	Mismatches            []string             `json:"mismatches,omitempty"`
+}
+
+// VisibleReportMetrics describes the browser-visible metrics captured from /reports/{id}.
+type VisibleReportMetrics struct {
+	RequestsTotal  int64   `json:"requests_total"`
+	RequestsPerSec float64 `json:"requests_per_sec"`
+	TotalLines     int     `json:"total_lines"`
+	MatchedLines   int     `json:"matched_lines"`
+	FilteredLines  int     `json:"filtered_lines"`
 }

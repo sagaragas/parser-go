@@ -1,0 +1,89 @@
+{
+  "scenario_id": "synthetic-small",
+  "scenario_description": "Synthetic combined-log parity scenario with one malformed line and one filtered health check.",
+  "timestamp": "2026-03-28T23:35:02.222234192Z",
+  "corpus": {
+    "id": "synthetic-small-v1",
+    "path": "\u003crepo-root\u003e/benchmark/corpora/synthetic/small/access.log",
+    "sha256": "cfb8103d89c4bb1cb69732e643177357e3bae1faf0a9cd304c2fb4966e52540d",
+    "bytes": 335,
+    "format": "combined",
+    "profile": "default"
+  },
+  "normalization": {
+    "id": "canonical-summary-v1",
+    "path": "\u003crepo-root\u003e/benchmark/normalization/canonical-summary-v1.json",
+    "sha256": "b01758e2adc0061fcd872a2ead892fe68fcb712d6c7ca05ce126e768e0d68928"
+  },
+  "host": {
+    "os": "linux",
+    "architecture": "amd64",
+    "kernel": "6.17.13-1-pve",
+    "cpu_model": "12th Gen Intel(R) Core(TM) i5-12500T",
+    "logical_cores": 12,
+    "total_ram_bytes": 41943040000,
+    "go_version": "go version go1.26.0 linux/amd64",
+    "python_version": "Python 3.11.2"
+  },
+  "baseline": {
+    "name": "legacy-python",
+    "command": [
+      "\u003cbaseline-python\u003e",
+      "\u003crepo-root\u003e/benchmark/support/legacy_baseline_adapter.py",
+      "--legacy-repo",
+      "\u003clegacy-repo\u003e",
+      "--corpus",
+      "\u003crepo-root\u003e/benchmark/corpora/synthetic/small/access.log",
+      "--out",
+      "\u003citeration-output\u003e"
+    ],
+    "version": "Python 3.11.2",
+    "git_revision": "904f838ddce5defc8715f2e444063520b7b0d612",
+    "controls": {
+      "warmup_iterations": 1,
+      "measured_iterations": 2,
+      "cache_posture": "cold",
+      "concurrency": 1,
+      "max_procs": 1
+    }
+  },
+  "rewrite": {
+    "name": "parsergo-rewrite",
+    "command": [
+      "\u003cgo-binary\u003e",
+      "run",
+      "./cmd/bench",
+      "impl",
+      "rewrite",
+      "--corpus",
+      "\u003crepo-root\u003e/benchmark/corpora/synthetic/small/access.log",
+      "--out",
+      "\u003citeration-output\u003e",
+      "--format",
+      "combined",
+      "--profile",
+      "default"
+    ],
+    "working_dir": "\u003crepo-root\u003e",
+    "version": "go version go1.26.0 linux/amd64",
+    "git_revision": "e06cfc004661d172216093ad79912e2b151b39b1",
+    "controls": {
+      "warmup_iterations": 1,
+      "measured_iterations": 2,
+      "cache_posture": "cold",
+      "concurrency": 1,
+      "max_procs": 1
+    }
+  },
+  "fairness": {
+    "required_controls": [
+      "warmup_iterations",
+      "measured_iterations",
+      "cache_posture",
+      "concurrency",
+      "max_procs"
+    ],
+    "symmetric": true,
+    "differences": []
+  }
+}

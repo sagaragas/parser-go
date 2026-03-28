@@ -1,0 +1,35 @@
+[
+  {
+    "implementation": "baseline",
+    "phase": "warmup",
+    "iteration": 1,
+    "status": "succeeded",
+    "started_at": "2026-03-28T23:35:26.378100551Z",
+    "finished_at": "2026-03-28T23:35:26.583171241Z",
+    "wall_ms": 205.069892,
+    "cpu_ms": 1613.9109999999998,
+    "max_rss_kb": 46216
+  },
+  {
+    "implementation": "baseline",
+    "phase": "measured",
+    "iteration": 2,
+    "status": "succeeded",
+    "started_at": "2026-03-28T23:35:26.583491052Z",
+    "finished_at": "2026-03-28T23:35:26.775337406Z",
+    "wall_ms": 191.840023,
+    "cpu_ms": 1578.686,
+    "max_rss_kb": 46100
+  },
+  {
+    "implementation": "baseline",
+    "phase": "measured",
+    "iteration": 3,
+    "status": "succeeded",
+    "started_at": "2026-03-28T23:35:26.775528662Z",
+    "finished_at": "2026-03-28T23:35:27.013554309Z",
+    "wall_ms": 238.020161,
+    "cpu_ms": 1576.2169999999999,
+    "max_rss_kb": 46000
+  }
+]

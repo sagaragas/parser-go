@@ -1,10 +1,10 @@
 {
-  "id": "synthetic-small",
-  "description": "Synthetic combined-log parity scenario with one malformed line and one filtered health check.",
-  "kind": "synthetic",
+  "id": "homelab-jellyfin-illustrative",
+  "description": "Illustrative homelab-backed Jellyfin retry window converted into anonymized combined-log input for parity and service/report comparison.",
+  "kind": "homelab",
   "corpus": {
-    "id": "synthetic-small-v1",
-    "path": "benchmark/corpora/synthetic/small/access.log",
+    "id": "homelab-jellyfin-illustrative-v1",
+    "path": "benchmark/corpora/homelab/jellyfin-illustrative/access.log",
     "format": "combined",
     "profile": "default"
   },
@@ -14,10 +14,11 @@
   },
   "evidence": {
     "publishable": true,
-    "representation": "representative",
-    "capture_window": "synthetic-fixture",
-    "traffic_mix_summary": "Small mixed fixture with one filtered health check, one malformed line, and two ranked request rows.",
-    "source_label": "synthetic-fixture"
+    "representation": "illustrative",
+    "capture_window": "2026-03-27T22:35:03-07:00/2026-03-27T22:41:23-07:00",
+    "traffic_mix_summary": "Two anonymized Jellyfin live-stream retry paths from a bounded homelab capture window with repeated 404 responses.",
+    "source_label": "homelab-media-service",
+    "redaction_report_path": "benchmark/corpora/homelab/jellyfin-illustrative/redaction-report.json"
   },
   "baseline": {
     "name": "legacy-python",

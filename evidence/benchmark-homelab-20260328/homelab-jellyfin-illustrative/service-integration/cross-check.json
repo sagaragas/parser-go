@@ -1,0 +1,85 @@
+{
+  "scenario_id": "homelab-jellyfin-illustrative",
+  "corpus_sha256": "27d75747c984391a52fba754c8f9bde1cc83cb6626d6832236fbd5378c0a9a87",
+  "job_id": "job_1774740927_129801799",
+  "submission_location": "/v1/analyses/job_1774740927_129801799",
+  "report_url": "http://127.0.0.1:3120/reports/job_1774740927_129801799",
+  "benchmark": {
+    "summary": {
+      "requests_total": 18,
+      "requests_per_sec": 0.28125,
+      "ranked_requests": [
+        {
+          "path": "/videos/session-a/live.m3u8",
+          "method": "GET",
+          "count": 12,
+          "percentage": 66.66666666666667
+        },
+        {
+          "path": "/videos/session-b/live.m3u8",
+          "method": "GET",
+          "count": 6,
+          "percentage": 33.333333333333336
+        }
+      ]
+    },
+    "workload": {
+      "input_bytes": 1728,
+      "total_lines": 18,
+      "matched_lines": 18,
+      "filtered_lines": 0,
+      "rejected_lines": 0,
+      "row_count": 18
+    }
+  },
+  "service": {
+    "summary": {
+      "requests_total": 18,
+      "requests_per_sec": 0.28125,
+      "ranked_requests": [
+        {
+          "path": "/videos/session-a/live.m3u8",
+          "method": "GET",
+          "count": 12,
+          "percentage": 66.66666666666667
+        },
+        {
+          "path": "/videos/session-b/live.m3u8",
+          "method": "GET",
+          "count": 6,
+          "percentage": 33.333333333333336
+        }
+      ]
+    },
+    "workload": {
+      "input_bytes": 1728,
+      "total_lines": 18,
+      "matched_lines": 18,
+      "filtered_lines": 0,
+      "rejected_lines": 0,
+      "row_count": 18
+    }
+  },
+  "visible_metrics": {
+    "requests_total": 18,
+    "requests_per_sec": 0.28,
+    "total_lines": 18,
+    "matched_lines": 18,
+    "filtered_lines": 0
+  },
+  "visible_ranked_requests": [
+    {
+      "path": "/videos/session-a/live.m3u8",
+      "method": "GET",
+      "count": 12,
+      "percentage": 66.7
+    },
+    {
+      "path": "/videos/session-b/live.m3u8",
+      "method": "GET",
+      "count": 6,
+      "percentage": 33.3
+    }
+  ],
+  "matches": true
+}

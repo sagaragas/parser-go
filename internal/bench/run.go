@@ -118,11 +118,21 @@ func Run(ctx context.Context, opts RunOptions) (*RunResult, error) {
 		return nil, fmt.Errorf("parity mismatch: summary_diffs=%d workload_diffs=%d", len(parity.SummaryDiffs), len(parity.WorkloadDiffs))
 	}
 
-	return &RunResult{
+	result := &RunResult{
 		ResultsDir:   resultsDir,
 		ManifestPath: manifestPath,
 		ParityPath:   parityPath,
-	}, nil
+	}
+
+	published, err := publishEvidenceSet(ctx, prepared, manifest, baselineExecution, rewriteExecution, parity, aggregate, opts)
+	if err != nil {
+		return nil, err
+	}
+	result.PublishedBundleDir = published.BundleDir
+	result.EvidenceIndexPath = published.IndexPath
+	result.CrossCheckPath = published.CrossCheckPath
+
+	return result, nil
 }
 
 func prepareScenario(repoRoot string, opts RunOptions) (*preparedScenario, error) {
@@ -150,6 +160,17 @@ func prepareScenario(repoRoot string, opts RunOptions) (*preparedScenario, error
 	normalizationPath := scenario.Normalization.Path
 	if !filepath.IsAbs(normalizationPath) {
 		normalizationPath = filepath.Join(repoRoot, normalizationPath)
+	}
+
+	if scenario.Evidence.RedactionReportPath != "" {
+		redactionPath := scenario.Evidence.RedactionReportPath
+		if !filepath.IsAbs(redactionPath) {
+			redactionPath = filepath.Join(repoRoot, redactionPath)
+		}
+		if _, err := os.Stat(redactionPath); err != nil {
+			return nil, fmt.Errorf("missing prerequisite: redaction report %s is not available", redactionPath)
+		}
+		scenario.Evidence.RedactionReportPath = redactionPath
 	}
 	if _, err := os.Stat(normalizationPath); err != nil {
 		return nil, fmt.Errorf("missing prerequisite: normalization rules %s are not available", normalizationPath)

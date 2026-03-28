@@ -1,0 +1,7 @@
+{
+  "passed": true,
+  "normalization_id": "canonical-summary-v1",
+  "summary_diffs": [],
+  "workload_diffs": [],
+  "performance_claims_allowed": true
+}

@@ -42,6 +42,8 @@ func runCommand(args []string) error {
 	resultsDir := fs.String("results-dir", "", "results directory")
 	repoRoot := fs.String("repo-root", "", "repo root")
 	baselinePython := fs.String("baseline-python", "", "baseline python interpreter path")
+	evidenceSetDir := fs.String("evidence-set-dir", "", "publishable evidence-set directory")
+	serviceBaseURL := fs.String("service-base-url", "", "service base URL for same-run cross-check")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -68,12 +70,23 @@ func runCommand(args []string) error {
 		ScenarioPath:   path,
 		ResultsDir:     *resultsDir,
 		BaselinePython: *baselinePython,
+		EvidenceSetDir: *evidenceSetDir,
+		ServiceBaseURL: *serviceBaseURL,
 	})
 	if err != nil {
 		return err
 	}
 
 	fmt.Fprintf(os.Stdout, "benchmark bundle: %s\n", result.ResultsDir)
+	if result.PublishedBundleDir != "" {
+		fmt.Fprintf(os.Stdout, "publishable bundle: %s\n", result.PublishedBundleDir)
+	}
+	if result.EvidenceIndexPath != "" {
+		fmt.Fprintf(os.Stdout, "evidence index: %s\n", result.EvidenceIndexPath)
+	}
+	if result.CrossCheckPath != "" {
+		fmt.Fprintf(os.Stdout, "service cross-check: %s\n", result.CrossCheckPath)
+	}
 	return nil
 }
 
@@ -117,7 +130,7 @@ func rewriteCommand(args []string) error {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, "Usage:")
-	fmt.Fprintln(os.Stderr, "  bench run --scenario <id> [--results-dir <dir>] [--baseline-python <path>]")
-	fmt.Fprintln(os.Stderr, "  bench run --scenario-file <path> [--results-dir <dir>] [--baseline-python <path>]")
+	fmt.Fprintln(os.Stderr, "  bench run --scenario <id> [--results-dir <dir>] [--baseline-python <path>] [--evidence-set-dir <dir>] [--service-base-url <url>]")
+	fmt.Fprintln(os.Stderr, "  bench run --scenario-file <path> [--results-dir <dir>] [--baseline-python <path>] [--evidence-set-dir <dir>] [--service-base-url <url>]")
 	fmt.Fprintln(os.Stderr, "  bench impl rewrite --corpus <path> --out <path> [--format combined] [--profile default]")
 }

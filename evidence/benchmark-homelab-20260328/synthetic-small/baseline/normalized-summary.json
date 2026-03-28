@@ -1,0 +1,18 @@
+{
+  "requests_total": 3,
+  "requests_per_sec": 1,
+  "ranked_requests": [
+    {
+      "path": "/api/users",
+      "method": "GET",
+      "count": 2,
+      "percentage": 66.66666666666667
+    },
+    {
+      "path": "/api/orders",
+      "method": "POST",
+      "count": 1,
+      "percentage": 33.333333333333336
+    }
+  ]
+}

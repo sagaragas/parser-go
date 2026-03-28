@@ -1,0 +1,17 @@
+{
+  "passed": true,
+  "required_members": [
+    "manifest.json",
+    "baseline/normalized-summary.json",
+    "baseline/workload.json",
+    "baseline/metrics.json",
+    "rewrite/normalized-summary.json",
+    "rewrite/workload.json",
+    "rewrite/metrics.json",
+    "parity/parity.json",
+    "parity/aggregate-summary.json",
+    "environment/snapshot.json",
+    "redaction/report.json",
+    "redaction/scan.json"
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "implementations": {
+    "baseline": {
+      "warmup_iterations": 1,
+      "measured_iterations": 2,
+      "successful_samples": 2,
+      "failed_samples": 0,
+      "wall_ms": {
+        "min": 191.840023,
+        "max": 238.020161,
+        "mean": 214.930092
+      },
+      "cpu_ms": {
+        "min": 1576.2169999999999,
+        "max": 1578.686,
+        "mean": 1577.4515
+      },
+      "max_rss_kb": {
+        "min": 46000,
+        "max": 46100,
+        "mean": 46050
+      }
+    },
+    "rewrite": {
+      "warmup_iterations": 1,
+      "measured_iterations": 2,
+      "successful_samples": 2,
+      "failed_samples": 0,
+      "wall_ms": {
+        "min": 38.377437,
+        "max": 38.926745,
+        "mean": 38.652091
+      },
+      "cpu_ms": {
+        "min": 162.492,
+        "max": 162.967,
+        "mean": 162.7295
+      },
+      "max_rss_kb": {
+        "min": 29124,
+        "max": 30312,
+        "mean": 29718
+      }
+    }
+  }
+}
