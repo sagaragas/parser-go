@@ -10,6 +10,9 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"parsergo/internal/api"
+	"parsergo/internal/job"
 )
 
 func main() {
@@ -27,9 +30,19 @@ func main() {
 		addr = "127.0.0.1:3120"
 	}
 
+	// Create job store
+	jobStore := job.NewStore()
+
+	// Create API handler
+	handler := api.NewHandler(api.HandlerConfig{
+		Logger:       logger,
+		JobStore:     jobStore,
+		MaxInputSize: 10 * 1024 * 1024, // 10MB
+	})
+
+	// Register routes
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", handleHealthz)
-	mux.HandleFunc("/readyz", handleReadyz)
+	handler.RegisterRoutes(mux)
 
 	srv := &http.Server{
 		Addr:         addr,
@@ -41,6 +54,10 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	// Set ready state after initialization (VAL-SVC-002)
+	handler.SetReady(true)
+	logger.Info("service ready")
 
 	go func() {
 		<-ctx.Done()
@@ -57,16 +74,4 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info("server stopped")
-}
-
-func handleHealthz(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"status":"ok"}`))
-}
-
-func handleReadyz(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"ready":true}`))
 }
