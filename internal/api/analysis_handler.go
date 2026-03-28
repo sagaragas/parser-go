@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -34,9 +35,17 @@ const (
 	ErrCodeNotComplete          ErrorCode = "analysis_not_complete"
 	ErrCodeExpired              ErrorCode = "analysis_expired"
 	ErrCodeServiceUnavailable   ErrorCode = "service_unavailable"
+	ErrCodeServiceSaturated     ErrorCode = "service_saturated"
 )
 
-const multipartTextFieldLimit int64 = 1024
+const (
+	multipartTextFieldLimit  int64 = 1024
+	defaultQueueLimit              = 2
+	defaultWorkerLimit             = 1
+	defaultRetention               = 24 * time.Hour
+	defaultRetryAfterSeconds       = 1
+	idempotencyKeyHeader           = "Idempotency-Key"
+)
 
 // APIError represents a structured client error response.
 type APIError struct {
@@ -74,13 +83,21 @@ type JobStatusResponse struct {
 
 // Handler handles analysis API requests.
 type Handler struct {
-	logger       *slog.Logger
-	jobStore     *job.Store
-	maxInputSize int64
-	ready        bool
-	readyMu      sync.RWMutex
-	workspaces   map[string]*Workspace
-	workspacesMu sync.RWMutex
+	logger            *slog.Logger
+	jobStore          *job.Store
+	maxInputSize      int64
+	queueLimit        int
+	workerLimit       int
+	retryAfterSeconds int
+	retention         time.Duration
+	now               func() time.Time
+	ready             bool
+	readyMu           sync.RWMutex
+	workspaces        map[string]*Workspace
+	workspacesMu      sync.RWMutex
+	jobQueue          chan queuedJob
+	idempotencyMu     sync.Mutex
+	idempotency       map[string]idempotencyRecord
 }
 
 // Workspace holds job artifacts.
@@ -91,11 +108,27 @@ type Workspace struct {
 	Summary  *summary.Summary
 }
 
+type queuedJob struct {
+	ID        string
+	Format    string
+	Profile   string
+	InputData []byte
+}
+
+type idempotencyRecord struct {
+	Fingerprint string
+	JobID       string
+}
+
 // HandlerConfig holds handler configuration.
 type HandlerConfig struct {
 	Logger       *slog.Logger
 	JobStore     *job.Store
 	MaxInputSize int64
+	QueueLimit   int
+	WorkerLimit  int
+	Retention    time.Duration
+	Now          func() time.Time
 }
 
 // NewHandler creates a new analysis handler.
@@ -105,11 +138,53 @@ func NewHandler(cfg HandlerConfig) *Handler {
 		maxSize = 10 * 1024 * 1024 // 10MB default
 	}
 
-	return &Handler{
-		logger:       cfg.Logger,
-		jobStore:     cfg.JobStore,
-		maxInputSize: maxSize,
-		workspaces:   make(map[string]*Workspace),
+	queueLimit := cfg.QueueLimit
+	if queueLimit <= 0 {
+		queueLimit = defaultQueueLimit
+	}
+
+	workerLimit := cfg.WorkerLimit
+	switch {
+	case workerLimit < 0:
+		workerLimit = 0
+	case workerLimit == 0:
+		workerLimit = defaultWorkerLimit
+	}
+
+	retention := cfg.Retention
+	if retention <= 0 {
+		retention = defaultRetention
+	}
+
+	now := cfg.Now
+	if now == nil {
+		now = time.Now
+	}
+
+	h := &Handler{
+		logger:            cfg.Logger,
+		jobStore:          cfg.JobStore,
+		maxInputSize:      maxSize,
+		queueLimit:        queueLimit,
+		workerLimit:       workerLimit,
+		retryAfterSeconds: defaultRetryAfterSeconds,
+		retention:         retention,
+		now:               now,
+		workspaces:        make(map[string]*Workspace),
+		jobQueue:          make(chan queuedJob, queueLimit),
+		idempotency:       make(map[string]idempotencyRecord),
+	}
+	h.startWorkers()
+	return h
+}
+
+func (h *Handler) startWorkers() {
+	for i := 0; i < h.workerLimit; i++ {
+		go func() {
+			for work := range h.jobQueue {
+				h.processJob(work.ID, work.Format, work.Profile, work.InputData)
+			}
+		}()
 	}
 }
 
@@ -168,6 +243,8 @@ func (h *Handler) handleReadyz(w http.ResponseWriter, r *http.Request) {
 
 // handleAnalyses handles analysis submissions (POST /v1/analyses).
 func (h *Handler) handleAnalyses(w http.ResponseWriter, r *http.Request) {
+	h.expireEligibleJobs(h.now())
+
 	// Check readiness first (VAL-SVC-002)
 	if !h.isReady() {
 		h.writeError(w, http.StatusServiceUnavailable, ErrCodeServiceUnavailable, "service not ready")
@@ -290,7 +367,7 @@ func (h *Handler) handleMultipartSubmission(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	h.createAndRunJob(w, r.Context(), format, profile, inputData)
+	h.createAndRunJob(w, format, profile, inputData, strings.TrimSpace(r.Header.Get(idempotencyKeyHeader)))
 }
 
 func (h *Handler) readMultipartTextField(w http.ResponseWriter, part *multipart.Part, fieldName string) (string, bool) {
@@ -358,7 +435,7 @@ func (h *Handler) validateFilename(filename string) error {
 }
 
 // createAndRunJob creates a job and starts processing.
-func (h *Handler) createAndRunJob(w http.ResponseWriter, ctx context.Context, format, profile string, inputData []byte) {
+func (h *Handler) createAndRunJob(w http.ResponseWriter, format, profile string, inputData []byte, idempotencyKey string) {
 	// Validate format (VAL-SVC-005)
 	if format == "" {
 		format = string(analysis.FormatCombined)
@@ -379,13 +456,27 @@ func (h *Handler) createAndRunJob(w http.ResponseWriter, ctx context.Context, fo
 		return
 	}
 
+	fingerprint := submissionFingerprint(format, profile, inputData)
+	if idempotencyKey != "" {
+		existingJob, found, conflict := h.lookupDuplicateJob(idempotencyKey, fingerprint)
+		if conflict {
+			h.writeError(w, http.StatusConflict, ErrCodeValidationFailed, "idempotency key already used for a different request")
+			return
+		}
+		if found {
+			h.writeAcceptedJobResponse(w, existingJob)
+			return
+		}
+	}
+
 	// Create job
 	jobID := generateJobID()
+	now := h.now()
 	j := &job.Job{
 		ID:        jobID,
 		State:     job.StateQueued,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 	h.jobStore.Create(j)
 
@@ -397,21 +488,23 @@ func (h *Handler) createAndRunJob(w http.ResponseWriter, ctx context.Context, fo
 	}
 	h.workspacesMu.Unlock()
 
-	// Process asynchronously
-	go h.processJob(jobID, format, profile, inputData)
-
-	// Return 202 Accepted response (VAL-SVC-003)
-	resp := AnalysisResponse{
+	if !h.enqueueJob(queuedJob{
 		ID:        jobID,
-		State:     string(job.StateQueued),
-		CreatedAt: j.CreatedAt,
-		Location:  "/v1/analyses/" + jobID,
+		Format:    format,
+		Profile:   profile,
+		InputData: inputData,
+	}) {
+		h.cleanupRejectedJob(jobID)
+		h.writeBackpressure(w)
+		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Location", resp.Location)
-	w.WriteHeader(http.StatusAccepted)
-	json.NewEncoder(w).Encode(resp)
+	if idempotencyKey != "" {
+		h.storeIdempotencyKey(idempotencyKey, fingerprint, jobID)
+	}
+
+	// Return 202 Accepted response (VAL-SVC-003)
+	h.writeAcceptedJobResponse(w, j)
 }
 
 // processJob runs the analysis asynchronously.
@@ -470,7 +563,7 @@ func (h *Handler) processJob(jobID, format, profile string, inputData []byte) {
 // failJob marks a job as failed with a safe error.
 func (h *Handler) failJob(jobID, code, message string) {
 	// Sanitize error message (VAL-SVC-011)
-	safeMsg := sanitizeErrorMessage(message)
+	safeMsg := safeTerminalErrorMessage(code, message)
 
 	h.jobStore.Update(&job.Job{
 		ID:    jobID,
@@ -485,6 +578,8 @@ func (h *Handler) failJob(jobID, code, message string) {
 
 // handleAnalysisDetail handles job status, summary, and report endpoints.
 func (h *Handler) handleAnalysisDetail(w http.ResponseWriter, r *http.Request) {
+	h.expireEligibleJobs(h.now())
+
 	// Check readiness
 	if !h.isReady() {
 		h.writeError(w, http.StatusServiceUnavailable, ErrCodeServiceUnavailable, "service not ready")
@@ -517,18 +612,7 @@ func (h *Handler) handleAnalysisDetail(w http.ResponseWriter, r *http.Request) {
 
 	// Check for expired state (VAL-SVC-013)
 	if j.State == job.StateExpired {
-		endpoint := ""
-		if len(parts) > 1 {
-			endpoint = parts[1]
-		}
-		switch endpoint {
-		case "summary":
-			h.writeError(w, http.StatusGone, ErrCodeExpired, "analysis has expired")
-		case "report":
-			h.writeError(w, http.StatusGone, ErrCodeExpired, "analysis has expired")
-		default:
-			h.writeJobStatus(w, j)
-		}
+		h.writeError(w, http.StatusGone, ErrCodeExpired, "analysis has expired")
 		return
 	}
 
@@ -655,6 +739,120 @@ func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request, j *job.Jo
 	w.Write([]byte(reportHTML))
 }
 
+func (h *Handler) enqueueJob(work queuedJob) bool {
+	select {
+	case h.jobQueue <- work:
+		return true
+	default:
+		return false
+	}
+}
+
+func (h *Handler) cleanupRejectedJob(jobID string) {
+	h.jobStore.Delete(jobID)
+	h.workspacesMu.Lock()
+	delete(h.workspaces, jobID)
+	h.workspacesMu.Unlock()
+}
+
+func (h *Handler) writeAcceptedJobResponse(w http.ResponseWriter, j *job.Job) {
+	resp := AnalysisResponse{
+		ID:        j.ID,
+		State:     string(j.State),
+		CreatedAt: j.CreatedAt,
+		Location:  "/v1/analyses/" + j.ID,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Location", resp.Location)
+	w.WriteHeader(http.StatusAccepted)
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (h *Handler) writeBackpressure(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", strconv.Itoa(h.retryAfterSeconds))
+	h.writeError(w, http.StatusTooManyRequests, ErrCodeServiceSaturated, "analysis queue is full; retry later")
+}
+
+func (h *Handler) lookupDuplicateJob(idempotencyKey, fingerprint string) (*job.Job, bool, bool) {
+	h.idempotencyMu.Lock()
+	record, ok := h.idempotency[idempotencyKey]
+	h.idempotencyMu.Unlock()
+	if !ok {
+		return nil, false, false
+	}
+	if record.Fingerprint != fingerprint {
+		return nil, false, true
+	}
+
+	existingJob, ok := h.jobStore.Get(record.JobID)
+	if !ok || existingJob.State == job.StateExpired {
+		h.deleteIdempotencyKey(idempotencyKey)
+		return nil, false, false
+	}
+	return existingJob, true, false
+}
+
+func (h *Handler) storeIdempotencyKey(idempotencyKey, fingerprint, jobID string) {
+	h.idempotencyMu.Lock()
+	defer h.idempotencyMu.Unlock()
+	h.idempotency[idempotencyKey] = idempotencyRecord{
+		Fingerprint: fingerprint,
+		JobID:       jobID,
+	}
+}
+
+func (h *Handler) deleteIdempotencyKey(idempotencyKey string) {
+	h.idempotencyMu.Lock()
+	defer h.idempotencyMu.Unlock()
+	delete(h.idempotency, idempotencyKey)
+}
+
+func (h *Handler) deleteIdempotencyForJob(jobID string) {
+	h.idempotencyMu.Lock()
+	defer h.idempotencyMu.Unlock()
+	for key, record := range h.idempotency {
+		if record.JobID == jobID {
+			delete(h.idempotency, key)
+		}
+	}
+}
+
+func (h *Handler) expireEligibleJobs(now time.Time) {
+	if h.retention <= 0 {
+		return
+	}
+
+	for _, existing := range h.jobStore.List() {
+		if !isExpirableJobState(existing.State) {
+			continue
+		}
+		if existing.UpdatedAt.IsZero() || now.Sub(existing.UpdatedAt) < h.retention {
+			continue
+		}
+
+		h.jobStore.Update(&job.Job{
+			ID:        existing.ID,
+			State:     job.StateExpired,
+			UpdatedAt: now,
+			Error:     existing.Error,
+		})
+		h.workspacesMu.Lock()
+		delete(h.workspaces, existing.ID)
+		h.workspacesMu.Unlock()
+		h.deleteIdempotencyForJob(existing.ID)
+	}
+}
+
+func isExpirableJobState(state job.State) bool {
+	switch state {
+	case job.StateSucceeded, job.StateFailed:
+		return true
+	default:
+		return false
+	}
+}
+
 // generateReportHTML creates a self-contained HTML report.
 func (h *Handler) generateReportHTML(jobID string, sum *summary.Summary) string {
 	// Simple HTML report (self-contained, no external dependencies)
@@ -777,6 +975,10 @@ func sanitizeErrorMessage(msg string) string {
 	// Remove potential file paths
 	re := regexp.MustCompile(`(?:/[^/\s]+)+`)
 	msg = re.ReplaceAllString(msg, "[path]")
+	msg = strings.ReplaceAll(msg, "\n", " ")
+	msg = strings.ReplaceAll(msg, "\r", " ")
+	msg = strings.ReplaceAll(msg, "\t", " ")
+	msg = strings.TrimSpace(msg)
 
 	// Limit length
 	if len(msg) > 200 {
@@ -784,6 +986,31 @@ func sanitizeErrorMessage(msg string) string {
 	}
 
 	return msg
+}
+
+func safeTerminalErrorMessage(code, raw string) string {
+	switch code {
+	case "malformed_dataset":
+		return "input contained no valid log lines"
+	case "analysis_failed":
+		return "analysis could not be completed from the provided input"
+	case "summary_failed":
+		return "analysis summary could not be generated"
+	case "engine_creation_failed":
+		return "analysis setup could not be completed"
+	default:
+		return sanitizeErrorMessage(raw)
+	}
+}
+
+func submissionFingerprint(format, profile string, inputData []byte) string {
+	hasher := sha256.New()
+	hasher.Write([]byte(format))
+	hasher.Write([]byte{0})
+	hasher.Write([]byte(profile))
+	hasher.Write([]byte{0})
+	hasher.Write(inputData)
+	return fmt.Sprintf("%x", hasher.Sum(nil))
 }
 
 func escapeHTML(s string) string {

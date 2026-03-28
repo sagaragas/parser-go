@@ -16,20 +16,61 @@ import (
 
 	"parsergo/internal/analysis"
 	"parsergo/internal/job"
+	"parsergo/internal/summary"
 )
 
-func setupTestHandler() (*Handler, *job.Store) {
+func setupTestHandlerWithConfig(cfg HandlerConfig) (*Handler, *job.Store) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, &slog.HandlerOptions{
 		Level: slog.LevelError,
 	}))
-	store := job.NewStore()
-	handler := NewHandler(HandlerConfig{
-		Logger:       logger,
-		JobStore:     store,
-		MaxInputSize: 1024 * 1024, // 1MB for tests
-	})
+	if cfg.Logger == nil {
+		cfg.Logger = logger
+	}
+	store := cfg.JobStore
+	if store == nil {
+		store = job.NewStore()
+		cfg.JobStore = store
+	}
+	if cfg.MaxInputSize == 0 {
+		cfg.MaxInputSize = 1024 * 1024 // 1MB for tests
+	}
+
+	handler := NewHandler(cfg)
 	handler.SetReady(true)
 	return handler, store
+}
+
+func setupTestHandler() (*Handler, *job.Store) {
+	return setupTestHandlerWithConfig(HandlerConfig{})
+}
+
+func newMultipartAnalysisRequest(t *testing.T, logData string, fields map[string]string, headers map[string]string) *http.Request {
+	t.Helper()
+
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	part, err := writer.CreateFormFile("file", "access.log")
+	if err != nil {
+		t.Fatalf("create multipart file failed: %v", err)
+	}
+	if _, err := part.Write([]byte(logData)); err != nil {
+		t.Fatalf("write multipart data failed: %v", err)
+	}
+	for key, value := range fields {
+		if err := writer.WriteField(key, value); err != nil {
+			t.Fatalf("write field %s failed: %v", key, err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer failed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/analyses", bytes.NewReader(buf.Bytes()))
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+	return req
 }
 
 // TestHealthzEndpoint tests the liveness endpoint (VAL-SVC-001)
@@ -959,6 +1000,251 @@ func TestDeterministicOrdering(t *testing.T) {
 			t.Errorf("expected %s at position %d, got %s", exp, i, paths1[i])
 		}
 	}
+}
+
+func TestLifecycle(t *testing.T) {
+	const validLogData = `127.0.0.1 - - [10/Oct/2000:13:55:36 -0700] "GET /index.html HTTP/1.0" 200 1000`
+
+	t.Run("BackpressureRejectsWithRetryAfter", func(t *testing.T) {
+		handler, store := setupTestHandlerWithConfig(HandlerConfig{
+			QueueLimit:  1,
+			WorkerLimit: -1,
+		})
+
+		firstReq := newMultipartAnalysisRequest(t, validLogData, nil, nil)
+		firstResp := httptest.NewRecorder()
+		handler.handleAnalyses(firstResp, firstReq)
+		if firstResp.Code != http.StatusAccepted {
+			t.Fatalf("expected first submission status %d, got %d: %s", http.StatusAccepted, firstResp.Code, firstResp.Body.String())
+		}
+
+		secondReq := newMultipartAnalysisRequest(t, validLogData, nil, nil)
+		secondResp := httptest.NewRecorder()
+		handler.handleAnalyses(secondResp, secondReq)
+		if secondResp.Code != http.StatusTooManyRequests {
+			t.Fatalf("expected saturated submission status %d, got %d: %s", http.StatusTooManyRequests, secondResp.Code, secondResp.Body.String())
+		}
+		if retryAfter := secondResp.Header().Get("Retry-After"); retryAfter != "1" {
+			t.Fatalf("expected Retry-After header %q, got %q", "1", retryAfter)
+		}
+
+		var errResp APIError
+		if err := json.Unmarshal(secondResp.Body.Bytes(), &errResp); err != nil {
+			t.Fatalf("failed to unmarshal backpressure response: %v", err)
+		}
+		if errResp.Code != ErrCodeServiceSaturated {
+			t.Fatalf("expected backpressure error code %s, got %s", ErrCodeServiceSaturated, errResp.Code)
+		}
+		if len(store.List()) != 1 {
+			t.Fatalf("expected exactly one accepted job to remain in store, got %d", len(store.List()))
+		}
+		if strings.Contains(secondResp.Body.String(), `"id"`) {
+			t.Fatalf("expected saturated response to omit job id, got %s", secondResp.Body.String())
+		}
+	})
+
+	t.Run("DuplicateRetryReturnsOriginalJob", func(t *testing.T) {
+		handler, store := setupTestHandlerWithConfig(HandlerConfig{
+			QueueLimit:  1,
+			WorkerLimit: -1,
+		})
+
+		headers := map[string]string{idempotencyKeyHeader: "retry-123"}
+		firstReq := newMultipartAnalysisRequest(t, validLogData, nil, headers)
+		firstResp := httptest.NewRecorder()
+		handler.handleAnalyses(firstResp, firstReq)
+		if firstResp.Code != http.StatusAccepted {
+			t.Fatalf("expected first submission status %d, got %d: %s", http.StatusAccepted, firstResp.Code, firstResp.Body.String())
+		}
+
+		secondReq := newMultipartAnalysisRequest(t, validLogData, nil, headers)
+		secondResp := httptest.NewRecorder()
+		handler.handleAnalyses(secondResp, secondReq)
+		if secondResp.Code != http.StatusAccepted {
+			t.Fatalf("expected idempotent replay status %d, got %d: %s", http.StatusAccepted, secondResp.Code, secondResp.Body.String())
+		}
+
+		var firstAccepted AnalysisResponse
+		if err := json.Unmarshal(firstResp.Body.Bytes(), &firstAccepted); err != nil {
+			t.Fatalf("failed to decode first submission: %v", err)
+		}
+		var secondAccepted AnalysisResponse
+		if err := json.Unmarshal(secondResp.Body.Bytes(), &secondAccepted); err != nil {
+			t.Fatalf("failed to decode second submission: %v", err)
+		}
+
+		if firstAccepted.ID == "" || secondAccepted.ID == "" {
+			t.Fatalf("expected non-empty job ids, got %q and %q", firstAccepted.ID, secondAccepted.ID)
+		}
+		if secondAccepted.ID != firstAccepted.ID {
+			t.Fatalf("expected duplicate-safe retry to return original job id %q, got %q", firstAccepted.ID, secondAccepted.ID)
+		}
+		if secondAccepted.Location != firstAccepted.Location {
+			t.Fatalf("expected duplicate-safe retry to return original location %q, got %q", firstAccepted.Location, secondAccepted.Location)
+		}
+		if len(store.List()) != 1 {
+			t.Fatalf("expected exactly one job after duplicate retry, got %d", len(store.List()))
+		}
+	})
+
+	t.Run("ExpiryResponsesAreExplicit", func(t *testing.T) {
+		handler, store := setupTestHandlerWithConfig(HandlerConfig{
+			Retention: 50 * time.Millisecond,
+		})
+
+		expiredAt := time.Now().Add(-time.Second)
+		jobID := "test_expired_lifecycle"
+		store.Create(&job.Job{
+			ID:        jobID,
+			State:     job.StateSucceeded,
+			CreatedAt: expiredAt.Add(-time.Second),
+			UpdatedAt: expiredAt,
+		})
+		handler.workspacesMu.Lock()
+		handler.workspaces[jobID] = &Workspace{
+			ID:    jobID,
+			JobID: jobID,
+			Summary: &summary.Summary{
+				RequestsTotal: 1,
+				TotalLines:    1,
+				MatchedLines:  1,
+				InputBytes:    64,
+			},
+		}
+		handler.workspacesMu.Unlock()
+
+		statusReq := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/v1/analyses/%s", jobID), nil)
+		statusResp := httptest.NewRecorder()
+		handler.handleAnalysisDetail(statusResp, statusReq)
+		if statusResp.Code != http.StatusGone {
+			t.Fatalf("expected expired status response %d, got %d: %s", http.StatusGone, statusResp.Code, statusResp.Body.String())
+		}
+
+		var statusErr APIError
+		if err := json.Unmarshal(statusResp.Body.Bytes(), &statusErr); err != nil {
+			t.Fatalf("failed to decode expired status response: %v", err)
+		}
+		if statusErr.Code != ErrCodeExpired {
+			t.Fatalf("expected expired status error code %s, got %s", ErrCodeExpired, statusErr.Code)
+		}
+
+		for _, path := range []string{
+			fmt.Sprintf("/v1/analyses/%s/summary", jobID),
+			fmt.Sprintf("/v1/analyses/%s/report", jobID),
+		} {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			resp := httptest.NewRecorder()
+			handler.handleAnalysisDetail(resp, req)
+			if resp.Code != http.StatusGone {
+				t.Fatalf("expected expired endpoint %s to return %d, got %d: %s", path, http.StatusGone, resp.Code, resp.Body.String())
+			}
+		}
+
+		stored, ok := store.Get(jobID)
+		if !ok {
+			t.Fatal("expected expired job to remain addressable in store")
+		}
+		if stored.State != job.StateExpired {
+			t.Fatalf("expected stored job state %s after expiry, got %s", job.StateExpired, stored.State)
+		}
+
+		handler.workspacesMu.RLock()
+		ws := handler.workspaces[jobID]
+		handler.workspacesMu.RUnlock()
+		if ws != nil && ws.Summary != nil {
+			t.Fatal("expected expired job workspace summary to be cleared")
+		}
+	})
+
+	t.Run("TerminalFailuresAreSanitized", func(t *testing.T) {
+		handler, store := setupTestHandler()
+		jobID := "test_failed_sanitized"
+		createdAt := time.Now().Add(-time.Minute)
+		store.Create(&job.Job{
+			ID:        jobID,
+			State:     job.StateQueued,
+			CreatedAt: createdAt,
+			UpdatedAt: createdAt,
+		})
+
+		handler.failJob(jobID, "analysis_failed", "panic: failed to compile regexp at /tmp/private/input.log\nstack trace line 1")
+
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/v1/analyses/%s", jobID), nil)
+		resp := httptest.NewRecorder()
+		handler.handleAnalysisDetail(resp, req)
+		if resp.Code != http.StatusOK {
+			t.Fatalf("expected failed job status response %d, got %d: %s", http.StatusOK, resp.Code, resp.Body.String())
+		}
+
+		var status JobStatusResponse
+		if err := json.Unmarshal(resp.Body.Bytes(), &status); err != nil {
+			t.Fatalf("failed to decode failed job status: %v", err)
+		}
+		if status.State != string(job.StateFailed) {
+			t.Fatalf("expected failed state, got %s", status.State)
+		}
+		if status.Error == nil {
+			t.Fatal("expected sanitized error object")
+		}
+		if strings.Contains(status.Error.Message, "/tmp/private") {
+			t.Fatalf("expected sanitized error message without path leak, got %q", status.Error.Message)
+		}
+		if strings.Contains(strings.ToLower(status.Error.Message), "panic") || strings.Contains(strings.ToLower(status.Error.Message), "stack") {
+			t.Fatalf("expected sanitized error message without panic details, got %q", status.Error.Message)
+		}
+	})
+
+	t.Run("FailedJobsStayOffReportIndex", func(t *testing.T) {
+		handler, _ := setupTestHandler()
+
+		badReq := newMultipartAnalysisRequest(t, "not a valid combined log line\nstill bad", map[string]string{
+			"format": "combined",
+		}, nil)
+		badResp := httptest.NewRecorder()
+		handler.handleAnalyses(badResp, badReq)
+		if badResp.Code != http.StatusAccepted {
+			t.Fatalf("expected failed dataset to be accepted asynchronously, got %d: %s", badResp.Code, badResp.Body.String())
+		}
+
+		var accepted AnalysisResponse
+		if err := json.Unmarshal(badResp.Body.Bytes(), &accepted); err != nil {
+			t.Fatalf("failed to decode failed-dataset acceptance response: %v", err)
+		}
+
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			statusReq := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/v1/analyses/%s", accepted.ID), nil)
+			statusResp := httptest.NewRecorder()
+			handler.handleAnalysisDetail(statusResp, statusReq)
+
+			var status JobStatusResponse
+			if err := json.Unmarshal(statusResp.Body.Bytes(), &status); err != nil {
+				t.Fatalf("failed to decode failed-dataset status: %v", err)
+			}
+			if status.State == string(job.StateFailed) {
+				break
+			}
+			time.Sleep(25 * time.Millisecond)
+		}
+
+		reportHandler := NewReportHandler(handler, handler.logger)
+		indexReq := httptest.NewRequest(http.MethodGet, "/reports", nil)
+		indexResp := httptest.NewRecorder()
+
+		mux := http.NewServeMux()
+		reportHandler.RegisterRoutes(mux)
+		mux.ServeHTTP(indexResp, indexReq)
+
+		if indexResp.Code != http.StatusOK {
+			t.Fatalf("expected reports index status %d, got %d: %s", http.StatusOK, indexResp.Code, indexResp.Body.String())
+		}
+		if !strings.Contains(indexResp.Body.String(), "No Reports Yet") {
+			t.Fatalf("expected failed analyses to leave the report index in its empty state, got %s", indexResp.Body.String())
+		}
+		if strings.Contains(indexResp.Body.String(), accepted.ID) {
+			t.Fatalf("expected failed job %s to be absent from report index, got %s", accepted.ID, indexResp.Body.String())
+		}
+	})
 }
 
 // TestAnalysisAPI is the main test suite that the validation contract expects

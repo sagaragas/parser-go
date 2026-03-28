@@ -47,6 +47,8 @@ func (h *ReportHandler) handleReportsIndex(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	h.analysisHandler.expireEligibleJobs(h.analysisHandler.now())
+
 	// Get list of succeeded jobs that have reports
 	jobs := h.analysisHandler.jobStore.List()
 	var reports []ReportIndexItem
@@ -81,6 +83,8 @@ func (h *ReportHandler) handleReportDetail(w http.ResponseWriter, r *http.Reques
 		h.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
+
+	h.analysisHandler.expireEligibleJobs(h.analysisHandler.now())
 
 	// Extract job ID from path: /reports/{id}
 	path := strings.TrimPrefix(r.URL.Path, "/reports/")

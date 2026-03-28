@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -60,7 +61,9 @@ func serveWithListener(ctx context.Context, logger *slog.Logger, listener net.Li
 	analysisHandler := api.NewHandler(api.HandlerConfig{
 		Logger:       logger,
 		JobStore:     jobStore,
-		MaxInputSize: 10 * 1024 * 1024, // 10MB
+		MaxInputSize: envInt64("PARSERGO_MAX_UPLOAD_BYTES", 10*1024*1024, logger),
+		QueueLimit:   envInt("PARSERGO_QUEUE_LIMIT", 2, logger),
+		Retention:    envDuration("PARSERGO_RETENTION", 24*time.Hour, logger),
 	})
 	reportHandler := api.NewReportHandler(analysisHandler, logger)
 
@@ -140,4 +143,46 @@ func waitForHealthz(ctx context.Context, addr string) bool {
 		case <-time.After(startupProbeInterval):
 		}
 	}
+}
+
+func envInt(name string, fallback int, logger *slog.Logger) int {
+	value := os.Getenv(name)
+	if value == "" {
+		return fallback
+	}
+
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		logger.Warn("invalid integer environment override; using fallback", "name", name, "value", value, "fallback", fallback)
+		return fallback
+	}
+	return parsed
+}
+
+func envInt64(name string, fallback int64, logger *slog.Logger) int64 {
+	value := os.Getenv(name)
+	if value == "" {
+		return fallback
+	}
+
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || parsed <= 0 {
+		logger.Warn("invalid integer environment override; using fallback", "name", name, "value", value, "fallback", fallback)
+		return fallback
+	}
+	return parsed
+}
+
+func envDuration(name string, fallback time.Duration, logger *slog.Logger) time.Duration {
+	value := os.Getenv(name)
+	if value == "" {
+		return fallback
+	}
+
+	parsed, err := time.ParseDuration(value)
+	if err != nil || parsed <= 0 {
+		logger.Warn("invalid duration environment override; using fallback", "name", name, "value", value, "fallback", fallback.String())
+		return fallback
+	}
+	return parsed
 }

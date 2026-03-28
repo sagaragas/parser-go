@@ -60,6 +60,13 @@ func (s *Store) Create(j *Job) {
 	s.jobs[j.ID] = j
 }
 
+// Delete removes a job from the store.
+func (s *Store) Delete(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.jobs, id)
+}
+
 // Update modifies an existing job.
 func (s *Store) Update(j *Job) bool {
 	s.mu.Lock()
