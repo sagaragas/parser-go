@@ -83,21 +83,22 @@ type JobStatusResponse struct {
 
 // Handler handles analysis API requests.
 type Handler struct {
-	logger            *slog.Logger
-	jobStore          *job.Store
-	maxInputSize      int64
-	queueLimit        int
-	workerLimit       int
-	retryAfterSeconds int
-	retention         time.Duration
-	now               func() time.Time
-	ready             bool
-	readyMu           sync.RWMutex
-	workspaces        map[string]*Workspace
-	workspacesMu      sync.RWMutex
-	jobQueue          chan queuedJob
-	idempotencyMu     sync.Mutex
-	idempotency       map[string]idempotencyRecord
+	logger                   *slog.Logger
+	jobStore                 *job.Store
+	maxInputSize             int64
+	queueLimit               int
+	workerLimit              int
+	retryAfterSeconds        int
+	retention                time.Duration
+	now                      func() time.Time
+	ready                    bool
+	readyMu                  sync.RWMutex
+	workspaces               map[string]*Workspace
+	workspacesMu             sync.RWMutex
+	jobQueue                 chan queuedJob
+	idempotencyMu            sync.Mutex
+	idempotency              map[string]idempotencyRecord
+	afterIdempotencyMissHook func() // test hook
 }
 
 // Workspace holds job artifacts.
@@ -458,52 +459,25 @@ func (h *Handler) createAndRunJob(w http.ResponseWriter, format, profile string,
 
 	fingerprint := submissionFingerprint(format, profile, inputData)
 	if idempotencyKey != "" {
-		existingJob, found, conflict := h.lookupDuplicateJob(idempotencyKey, fingerprint)
+		acceptedJob, conflict, saturated := h.createOrReuseIdempotentJob(format, profile, inputData, idempotencyKey, fingerprint)
 		if conflict {
 			h.writeError(w, http.StatusConflict, ErrCodeValidationFailed, "idempotency key already used for a different request")
 			return
 		}
-		if found {
-			h.writeAcceptedJobResponse(w, existingJob)
+		if saturated {
+			h.writeBackpressure(w)
 			return
 		}
-	}
-
-	// Create job
-	jobID := generateJobID()
-	now := h.now()
-	j := &job.Job{
-		ID:        jobID,
-		State:     job.StateQueued,
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
-	h.jobStore.Create(j)
-
-	// Store workspace
-	h.workspacesMu.Lock()
-	h.workspaces[jobID] = &Workspace{
-		ID:    jobID,
-		JobID: jobID,
-	}
-	h.workspacesMu.Unlock()
-
-	if !h.enqueueJob(queuedJob{
-		ID:        jobID,
-		Format:    format,
-		Profile:   profile,
-		InputData: inputData,
-	}) {
-		h.cleanupRejectedJob(jobID)
-		h.writeBackpressure(w)
+		h.writeAcceptedJobResponse(w, acceptedJob)
 		return
 	}
 
-	if idempotencyKey != "" {
-		h.storeIdempotencyKey(idempotencyKey, fingerprint, jobID)
-	}
-
 	// Return 202 Accepted response (VAL-SVC-003)
+	j, ok := h.createQueuedJob(format, profile, inputData)
+	if !ok {
+		h.writeBackpressure(w)
+		return
+	}
 	h.writeAcceptedJobResponse(w, j)
 }
 
@@ -774,10 +748,65 @@ func (h *Handler) writeBackpressure(w http.ResponseWriter) {
 	h.writeError(w, http.StatusTooManyRequests, ErrCodeServiceSaturated, "analysis queue is full; retry later")
 }
 
-func (h *Handler) lookupDuplicateJob(idempotencyKey, fingerprint string) (*job.Job, bool, bool) {
+func (h *Handler) createQueuedJob(format, profile string, inputData []byte) (*job.Job, bool) {
+	jobID := generateJobID()
+	now := h.now()
+	j := &job.Job{
+		ID:        jobID,
+		State:     job.StateQueued,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	h.jobStore.Create(j)
+
+	h.workspacesMu.Lock()
+	h.workspaces[jobID] = &Workspace{
+		ID:    jobID,
+		JobID: jobID,
+	}
+	h.workspacesMu.Unlock()
+
+	if !h.enqueueJob(queuedJob{
+		ID:        jobID,
+		Format:    format,
+		Profile:   profile,
+		InputData: inputData,
+	}) {
+		h.cleanupRejectedJob(jobID)
+		return nil, false
+	}
+
+	return j, true
+}
+
+func (h *Handler) createOrReuseIdempotentJob(format, profile string, inputData []byte, idempotencyKey, fingerprint string) (*job.Job, bool, bool) {
 	h.idempotencyMu.Lock()
+	defer h.idempotencyMu.Unlock()
+
+	existingJob, found, conflict := h.lookupDuplicateJobLocked(idempotencyKey, fingerprint)
+	if conflict {
+		return nil, true, false
+	}
+	if found {
+		return existingJob, false, false
+	}
+	if h.afterIdempotencyMissHook != nil {
+		h.afterIdempotencyMissHook()
+	}
+
+	createdJob, ok := h.createQueuedJob(format, profile, inputData)
+	if !ok {
+		return nil, false, true
+	}
+	h.idempotency[idempotencyKey] = idempotencyRecord{
+		Fingerprint: fingerprint,
+		JobID:       createdJob.ID,
+	}
+	return createdJob, false, false
+}
+
+func (h *Handler) lookupDuplicateJobLocked(idempotencyKey, fingerprint string) (*job.Job, bool, bool) {
 	record, ok := h.idempotency[idempotencyKey]
-	h.idempotencyMu.Unlock()
 	if !ok {
 		return nil, false, false
 	}
@@ -787,19 +816,10 @@ func (h *Handler) lookupDuplicateJob(idempotencyKey, fingerprint string) (*job.J
 
 	existingJob, ok := h.jobStore.Get(record.JobID)
 	if !ok || existingJob.State == job.StateExpired {
-		h.deleteIdempotencyKey(idempotencyKey)
+		delete(h.idempotency, idempotencyKey)
 		return nil, false, false
 	}
 	return existingJob, true, false
-}
-
-func (h *Handler) storeIdempotencyKey(idempotencyKey, fingerprint, jobID string) {
-	h.idempotencyMu.Lock()
-	defer h.idempotencyMu.Unlock()
-	h.idempotency[idempotencyKey] = idempotencyRecord{
-		Fingerprint: fingerprint,
-		JobID:       jobID,
-	}
 }
 
 func (h *Handler) deleteIdempotencyKey(idempotencyKey string) {

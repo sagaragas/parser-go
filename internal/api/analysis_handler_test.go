@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1084,6 +1085,94 @@ func TestLifecycle(t *testing.T) {
 		}
 		if len(store.List()) != 1 {
 			t.Fatalf("expected exactly one job after duplicate retry, got %d", len(store.List()))
+		}
+	})
+
+	t.Run("ConcurrentDuplicateRetriesCreateSingleJobAtomically", func(t *testing.T) {
+		handler, store := setupTestHandlerWithConfig(HandlerConfig{
+			QueueLimit:  16,
+			WorkerLimit: -1,
+		})
+		handler.afterIdempotencyMissHook = func() {
+			time.Sleep(10 * time.Millisecond)
+		}
+
+		headers := map[string]string{idempotencyKeyHeader: "retry-concurrent"}
+		const concurrentRequests = 8
+
+		type submissionResult struct {
+			status int
+			body   string
+			job    AnalysisResponse
+		}
+
+		results := make([]submissionResult, concurrentRequests)
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+
+		for i := 0; i < concurrentRequests; i++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				<-start
+
+				req := newMultipartAnalysisRequest(t, validLogData, nil, headers)
+				resp := httptest.NewRecorder()
+				handler.handleAnalyses(resp, req)
+
+				results[idx].status = resp.Code
+				results[idx].body = resp.Body.String()
+				if resp.Code == http.StatusAccepted {
+					if err := json.Unmarshal(resp.Body.Bytes(), &results[idx].job); err != nil {
+						t.Errorf("failed to decode concurrent submission %d: %v", idx, err)
+					}
+				}
+			}(i)
+		}
+
+		close(start)
+		wg.Wait()
+
+		var original AnalysisResponse
+		for i, result := range results {
+			if result.status != http.StatusAccepted {
+				t.Fatalf("expected concurrent submission %d to return %d, got %d: %s", i, http.StatusAccepted, result.status, result.body)
+			}
+			if result.job.ID == "" || result.job.Location == "" {
+				t.Fatalf("expected concurrent submission %d to return job id and location, got %+v", i, result.job)
+			}
+			if i == 0 {
+				original = result.job
+				continue
+			}
+			if result.job.ID != original.ID {
+				t.Fatalf("expected concurrent submission %d to reuse job id %q, got %q", i, original.ID, result.job.ID)
+			}
+			if result.job.Location != original.Location {
+				t.Fatalf("expected concurrent submission %d to reuse location %q, got %q", i, original.Location, result.job.Location)
+			}
+		}
+
+		if len(store.List()) != 1 {
+			t.Fatalf("expected exactly one job after concurrent duplicate retries, got %d", len(store.List()))
+		}
+
+		retryReq := newMultipartAnalysisRequest(t, validLogData, nil, headers)
+		retryResp := httptest.NewRecorder()
+		handler.handleAnalyses(retryResp, retryReq)
+		if retryResp.Code != http.StatusAccepted {
+			t.Fatalf("expected later retry status %d, got %d: %s", http.StatusAccepted, retryResp.Code, retryResp.Body.String())
+		}
+
+		var later AnalysisResponse
+		if err := json.Unmarshal(retryResp.Body.Bytes(), &later); err != nil {
+			t.Fatalf("failed to decode later retry response: %v", err)
+		}
+		if later.ID != original.ID {
+			t.Fatalf("expected later retry to return original job id %q, got %q", original.ID, later.ID)
+		}
+		if later.Location != original.Location {
+			t.Fatalf("expected later retry to return original location %q, got %q", original.Location, later.Location)
 		}
 	})
 
