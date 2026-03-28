@@ -221,6 +221,34 @@ func TestValidationErrors(t *testing.T) {
 		}
 	})
 
+	t.Run("caddy format returns 422 until implemented", func(t *testing.T) {
+		handler, _ := setupTestHandler()
+
+		logData := `{"level":"info","ts":1672531200,"msg":"handled request"}`
+		var buf bytes.Buffer
+		writer := multipart.NewWriter(&buf)
+		part, _ := writer.CreateFormFile("file", "access.json")
+		part.Write([]byte(logData))
+		writer.WriteField("format", "caddy")
+		writer.Close()
+
+		req := httptest.NewRequest(http.MethodPost, "/v1/analyses", &buf)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		w := httptest.NewRecorder()
+
+		handler.handleAnalyses(w, req)
+
+		if w.Code != http.StatusUnprocessableEntity {
+			t.Errorf("expected status %d, got %d", http.StatusUnprocessableEntity, w.Code)
+		}
+
+		var errResp APIError
+		json.Unmarshal(w.Body.Bytes(), &errResp)
+		if errResp.Code != ErrCodeValidationFailed {
+			t.Errorf("expected error code %s, got %s", ErrCodeValidationFailed, errResp.Code)
+		}
+	})
+
 	t.Run("no input data returns 422", func(t *testing.T) {
 		handler, _ := setupTestHandler()
 

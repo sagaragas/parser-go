@@ -4,7 +4,6 @@ import (
 	"context"
 	"strings"
 	"testing"
-	"time"
 
 	"parsergo/internal/analysis"
 )
@@ -53,7 +52,7 @@ func runFixtureTest(t *testing.T, tc FixtureTest) {
 	}
 
 	// Compute summary and check ranked count
-	sum, err := Compute(result, 1*time.Second)
+	sum, err := Compute(result)
 	if err != nil {
 		t.Fatalf("summary compute error: %v", err)
 	}
@@ -84,8 +83,8 @@ func runFixtureTest(t *testing.T, tc FixtureTest) {
 func TestCanonicalSummary_FixtureMalformedLines(t *testing.T) {
 	tests := []FixtureTest{
 		{
-			Name: "single_malformed_line",
-			Input: `this is not a valid log line`,
+			Name:           "single_malformed_line",
+			Input:          `this is not a valid log line`,
 			Format:         analysis.FormatCombined,
 			WantTotalLines: 1,
 			WantMatched:    0,
@@ -159,8 +158,8 @@ func TestCanonicalSummary_FixtureMalformedLines(t *testing.T) {
 func TestCanonicalSummary_FixtureFilteredLines(t *testing.T) {
 	tests := []FixtureTest{
 		{
-			Name: "single_health_check_filtered",
-			Input: `127.0.0.1 - - [10/Oct/2000:13:55:36 -0700] "GET /health HTTP/1.0" 200 10`,
+			Name:           "single_health_check_filtered",
+			Input:          `127.0.0.1 - - [10/Oct/2000:13:55:36 -0700] "GET /health HTTP/1.0" 200 10`,
 			Format:         analysis.FormatCombined,
 			WantTotalLines: 1,
 			WantMatched:    0,
@@ -240,8 +239,8 @@ func TestCanonicalSummary_FixtureFilteredLines(t *testing.T) {
 func TestCanonicalSummary_FixtureHighCardinality(t *testing.T) {
 	tests := []FixtureTest{
 		{
-			Name: "hundred_unique_paths",
-			Input: generateHighCardinalityInput(100, 1),
+			Name:           "hundred_unique_paths",
+			Input:          generateHighCardinalityInput(100, 1),
 			Format:         analysis.FormatCombined,
 			WantTotalLines: 100,
 			WantMatched:    100,
@@ -250,8 +249,8 @@ func TestCanonicalSummary_FixtureHighCardinality(t *testing.T) {
 			WantRankCount:  100,
 		},
 		{
-			Name: "thousand_unique_paths",
-			Input: generateHighCardinalityInput(1000, 1),
+			Name:           "thousand_unique_paths",
+			Input:          generateHighCardinalityInput(1000, 1),
 			Format:         analysis.FormatCombined,
 			WantTotalLines: 1000,
 			WantMatched:    1000,
@@ -292,7 +291,7 @@ func TestCanonicalSummary_StableOrdering(t *testing.T) {
 			t.Fatalf("iteration %d: analyze error: %v", i, err)
 		}
 
-		sum, err := Compute(result, time.Second)
+		sum, err := Compute(result)
 		if err != nil {
 			t.Fatalf("iteration %d: compute error: %v", i, err)
 		}
@@ -357,7 +356,7 @@ func TestCanonicalSummary_MixedWorkload(t *testing.T) {
 		Profile: analysis.ProfileDefault,
 	})
 	result, _ := eng.AnalyzeBytes(testingContext(), []byte(input))
-	sum, _ := Compute(result, time.Second)
+	sum, _ := Compute(result)
 
 	// /api/users should be first (count 2)
 	if len(sum.RankedRequests) >= 1 {
@@ -388,7 +387,7 @@ func TestCanonicalSummary_WorkloadAccountingFields(t *testing.T) {
 		Profile: analysis.ProfileDefault,
 	})
 	result, _ := eng.AnalyzeBytes(testingContext(), []byte(input))
-	sum, _ := Compute(result, time.Second)
+	sum, _ := Compute(result)
 
 	// Verify all workload-accounting fields are present and correct
 	if sum.InputBytes == 0 {
@@ -410,6 +409,9 @@ func TestCanonicalSummary_WorkloadAccountingFields(t *testing.T) {
 	// Verify core totals/rates
 	if sum.RequestsTotal != 3 {
 		t.Errorf("RequestsTotal: want 3, got %d", sum.RequestsTotal)
+	}
+	if sum.RequestsPerSec != 1.5 {
+		t.Errorf("RequestsPerSec: want 1.5, got %f", sum.RequestsPerSec)
 	}
 
 	// Verify ranked list
@@ -458,5 +460,3 @@ func generateHighCardinalityInput(uniqueCount, requestsPerPath int) string {
 	}
 	return strings.Join(lines, "\n")
 }
-
-

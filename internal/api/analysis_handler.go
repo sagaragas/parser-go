@@ -55,19 +55,19 @@ type AnalysisRequest struct {
 
 // AnalysisResponse represents the response to a successful submission.
 type AnalysisResponse struct {
-	ID        string      `json:"id"`
-	State     string      `json:"state"`
-	CreatedAt time.Time   `json:"created_at"`
-	Location  string      `json:"location"`
+	ID        string    `json:"id"`
+	State     string    `json:"state"`
+	CreatedAt time.Time `json:"created_at"`
+	Location  string    `json:"location"`
 }
 
 // JobStatusResponse represents the response for job status polling.
 type JobStatusResponse struct {
-	ID        string       `json:"id"`
-	State     string       `json:"state"`
-	CreatedAt time.Time    `json:"created_at"`
-	UpdatedAt time.Time    `json:"updated_at"`
-	Error     *APIError    `json:"error,omitempty"`
+	ID        string    `json:"id"`
+	State     string    `json:"state"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Error     *APIError `json:"error,omitempty"`
 }
 
 // Handler handles analysis API requests.
@@ -223,7 +223,7 @@ func (h *Handler) handleMultipartSubmission(w http.ResponseWriter, r *http.Reque
 	reader := multipart.NewReader(r.Body, boundary)
 
 	var inputData []byte
-	var format string = string(analysis.FormatCombined) // default
+	var format string = string(analysis.FormatCombined)  // default
 	var profile string = string(analysis.ProfileDefault) // default
 
 	// Parse form parts
@@ -421,7 +421,6 @@ func (h *Handler) processJob(jobID, format, profile string, inputData []byte) {
 
 	// Run analysis
 	ctx := context.Background()
-	start := time.Now()
 	result, err := engine.AnalyzeBytes(ctx, inputData)
 	if err != nil {
 		h.failJob(jobID, "analysis_failed", err.Error())
@@ -429,7 +428,7 @@ func (h *Handler) processJob(jobID, format, profile string, inputData []byte) {
 	}
 
 	// Compute summary
-	sum, err := summary.Compute(result, time.Since(start))
+	sum, err := summary.Compute(result)
 	if err != nil {
 		h.failJob(jobID, "summary_failed", err.Error())
 		return
@@ -739,7 +738,7 @@ func generateJobID() string {
 
 func isValidFormat(format string) bool {
 	switch analysis.Format(format) {
-	case analysis.FormatCaddy, analysis.FormatCombined:
+	case analysis.FormatCombined:
 		return true
 	default:
 		return false

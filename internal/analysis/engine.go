@@ -2,10 +2,12 @@ package analysis
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -15,7 +17,7 @@ import (
 type Format string
 
 const (
-	// FormatCaddy supports Caddy server access logs (JSON format)
+	// FormatCaddy is reserved for future Caddy JSON support.
 	FormatCaddy Format = "caddy"
 	// FormatCombined supports Apache/Nginx combined log format
 	FormatCombined Format = "combined"
@@ -57,12 +59,14 @@ type EngineConfig struct {
 func NewEngine(config EngineConfig) (*Engine, error) {
 	// Validate format
 	switch config.Format {
-	case FormatCaddy, FormatCombined:
+	case FormatCombined:
 		// supported
 	case "":
-		return nil, fmt.Errorf("format is required: supported formats are %q, %q", FormatCaddy, FormatCombined)
+		return nil, fmt.Errorf("format is required: supported formats are %q", FormatCombined)
+	case FormatCaddy:
+		return nil, fmt.Errorf("unsupported format %q: supported formats are %q", config.Format, FormatCombined)
 	default:
-		return nil, fmt.Errorf("unsupported format %q: supported formats are %q, %q", config.Format, FormatCaddy, FormatCombined)
+		return nil, fmt.Errorf("unsupported format %q: supported formats are %q", config.Format, FormatCombined)
 	}
 
 	// Validate profile
@@ -84,11 +88,11 @@ func NewEngine(config EngineConfig) (*Engine, error) {
 // Result holds analysis output including workload-accounting fields.
 type Result struct {
 	// Workload accounting
-	InputBytes   int64
-	TotalLines   int
-	Matched      int
-	Filtered     int
-	Malformed    int
+	InputBytes int64
+	TotalLines int
+	Matched    int
+	Filtered   int
+	Malformed  int
 
 	// Parsed records
 	Records []Record
@@ -106,7 +110,8 @@ func (e *Engine) Analyze(ctx context.Context, r io.Reader) (*Result, error) {
 		Records: make([]Record, 0),
 	}
 
-	scanner := bufio.NewScanner(r)
+	counter := &countingReader{reader: r}
+	scanner := bufio.NewScanner(counter)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024) // 1MB max line size
 
 	for scanner.Scan() {
@@ -118,7 +123,6 @@ func (e *Engine) Analyze(ctx context.Context, r io.Reader) (*Result, error) {
 
 		line := scanner.Text()
 		result.TotalLines++
-		result.InputBytes += int64(len(line) + 1) // +1 for newline
 
 		rec, err := e.parseLine(line)
 		if err != nil {
@@ -139,6 +143,8 @@ func (e *Engine) Analyze(ctx context.Context, r io.Reader) (*Result, error) {
 		return nil, fmt.Errorf("scan error: %w", err)
 	}
 
+	result.InputBytes = counter.count
+
 	return result, nil
 }
 
@@ -147,7 +153,7 @@ func (e *Engine) AnalyzeBytes(ctx context.Context, input []byte) (*Result, error
 	if len(input) == 0 {
 		return nil, fmt.Errorf("empty input")
 	}
-	return e.Analyze(ctx, strings.NewReader(string(input)))
+	return e.Analyze(ctx, bytes.NewReader(input))
 }
 
 // Combined log format regex
@@ -162,17 +168,25 @@ var combinedLogRegex = regexp.MustCompile(
 		`(?P<size>\d+|-)`,
 )
 
+const combinedTimestampLayout = "02/Jan/2006:15:04:05 -0700"
+
+type countingReader struct {
+	reader io.Reader
+	count  int64
+}
+
+func (r *countingReader) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	r.count += int64(n)
+	return n, err
+}
+
 // parseLine parses a single log line based on the configured format.
 // Returns (nil, nil) for filtered lines (e.g., health checks).
 // Returns (nil, error) for malformed lines.
 func (e *Engine) parseLine(line string) (*Record, error) {
 	switch e.format {
 	case FormatCombined:
-		return e.parseCombinedLog(line)
-	case FormatCaddy:
-		// For now, treat Caddy as a specialized combined format or JSON
-		// This is a simplified implementation - JSON parsing would be added
-		// when full Caddy format support is implemented
 		return e.parseCombinedLog(line)
 	default:
 		return nil, fmt.Errorf("unsupported format: %s", e.format)
@@ -191,6 +205,7 @@ func (e *Engine) parseCombinedLog(line string) (*Record, error) {
 	path := ""
 	status := 0
 	size := int64(0)
+	timestamp := time.Time{}
 
 	for i, name := range combinedLogRegex.SubexpNames() {
 		if i == 0 {
@@ -200,24 +215,33 @@ func (e *Engine) parseCombinedLog(line string) (*Record, error) {
 			break
 		}
 		switch name {
+		case "timestamp":
+			parsed, err := time.Parse(combinedTimestampLayout, matches[i])
+			if err != nil {
+				return nil, fmt.Errorf("invalid timestamp: %w", err)
+			}
+			timestamp = parsed
 		case "method":
 			method = matches[i]
 		case "path":
 			path = matches[i]
 		case "status":
-			// Parse status code
-			if _, err := fmt.Sscanf(matches[i], "%d", &status); err != nil {
+			parsed, err := strconv.Atoi(matches[i])
+			if err != nil {
 				return nil, fmt.Errorf("invalid status code: %s", matches[i])
 			}
+			status = parsed
 		case "size":
-			// Parse response size
 			sizeStr := matches[i]
 			if sizeStr == "-" {
 				size = 0
 			} else {
-				if _, err := fmt.Sscanf(sizeStr, "%d", &size); err != nil {
+				parsed, err := strconv.ParseInt(sizeStr, 10, 64)
+				if err != nil {
 					size = 0
+					continue
 				}
+				size = parsed
 			}
 		}
 	}
@@ -228,7 +252,7 @@ func (e *Engine) parseCombinedLog(line string) (*Record, error) {
 	}
 
 	return &Record{
-		Timestamp: time.Now(), // Would parse from timestamp field in full implementation
+		Timestamp: timestamp,
 		Method:    method,
 		Path:      path,
 		Status:    status,

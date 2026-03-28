@@ -3,7 +3,6 @@ package summary
 import (
 	"fmt"
 	"sort"
-	"time"
 
 	"parsergo/internal/analysis"
 )
@@ -38,7 +37,7 @@ type RankedRequest struct {
 // Compute performs the canonical summary computation from analysis results.
 // This function is deterministic: identical input produces identical output,
 // including stable ordering of ranked requests.
-func Compute(result *analysis.Result, duration time.Duration) (*Summary, error) {
+func Compute(result *analysis.Result) (*Summary, error) {
 	if result == nil {
 		return nil, fmt.Errorf("nil analysis result")
 	}
@@ -53,9 +52,16 @@ func Compute(result *analysis.Result, duration time.Duration) (*Summary, error) 
 		RankedRequests: make([]RankedRequest, 0),
 	}
 
-	// Calculate requests per second
-	if duration > 0 {
-		sum.RequestsPerSec = float64(sum.RequestsTotal) / duration.Seconds()
+	// Calculate requests per second from the input data's timestamp span.
+	if len(result.Records) >= 2 {
+		first := result.Records[0].Timestamp
+		last := result.Records[len(result.Records)-1].Timestamp
+		if !first.IsZero() && !last.IsZero() {
+			duration := last.Sub(first)
+			if duration > 0 {
+				sum.RequestsPerSec = float64(sum.RequestsTotal) / duration.Seconds()
+			}
+		}
 	}
 
 	// Build ranked requests with aggregation

@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNewEngine_ValidConfig(t *testing.T) {
@@ -119,6 +120,13 @@ func TestEngine_Analyze_CombinedLog_SingleLine(t *testing.T) {
 	if rec.Size != 2326 {
 		t.Errorf("expected size 2326, got %d", rec.Size)
 	}
+	wantTimestamp, err := time.Parse(combinedTimestampLayout, "10/Oct/2000:13:55:36 -0700")
+	if err != nil {
+		t.Fatalf("failed to parse expected timestamp: %v", err)
+	}
+	if !rec.Timestamp.Equal(wantTimestamp) {
+		t.Errorf("expected timestamp %s, got %s", wantTimestamp, rec.Timestamp)
+	}
 }
 
 func TestEngine_Analyze_CombinedLog_MultipleLines(t *testing.T) {
@@ -223,36 +231,46 @@ func TestEngine_Analyze_InputBytes(t *testing.T) {
 	ctx := context.Background()
 
 	line := `127.0.0.1 - - [10/Oct/2000:13:55:36 -0700] "GET /page HTTP/1.0" 200 100`
-	input := line + "\n" + line
 
-	result, err := eng.AnalyzeBytes(ctx, []byte(input))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{
+			name:  "with trailing newline",
+			input: line + "\n" + line + "\n",
+		},
+		{
+			name:  "without trailing newline",
+			input: line + "\n" + line,
+		},
 	}
 
-	// InputBytes includes line content plus newline
-	expectedBytes := int64(len(line) + 1 + len(line) + 1)
-	if result.InputBytes != expectedBytes {
-		t.Errorf("expected InputBytes %d, got %d", expectedBytes, result.InputBytes)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := eng.AnalyzeBytes(ctx, []byte(tc.input))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			expectedBytes := int64(len(tc.input))
+			if result.InputBytes != expectedBytes {
+				t.Errorf("expected InputBytes %d, got %d", expectedBytes, result.InputBytes)
+			}
+		})
 	}
 }
 
-func TestEngine_Analyze_CaddyFormat(t *testing.T) {
-	// Caddy format uses same parsing as combined for now
-	eng, _ := NewEngine(EngineConfig{
+func TestNewEngine_CaddyFormatRejected(t *testing.T) {
+	_, err := NewEngine(EngineConfig{
 		Format:  FormatCaddy,
 		Profile: ProfileDefault,
 	})
-	ctx := context.Background()
-
-	line := `127.0.0.1 - - [10/Oct/2000:13:55:36 -0700] "GET /api HTTP/1.0" 200 500`
-	result, err := eng.AnalyzeBytes(ctx, []byte(line))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err == nil {
+		t.Fatal("expected Caddy format to be rejected until real parsing is implemented")
 	}
-
-	if result.Matched != 1 {
-		t.Errorf("expected Matched 1, got %d", result.Matched)
+	if !strings.Contains(err.Error(), "unsupported format") {
+		t.Fatalf("expected unsupported format error, got %v", err)
 	}
 }
 

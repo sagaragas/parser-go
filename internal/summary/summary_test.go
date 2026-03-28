@@ -8,19 +8,20 @@ import (
 )
 
 func TestCompute_Basic(t *testing.T) {
+	start := time.Date(2000, time.October, 10, 13, 55, 36, 0, time.UTC)
 	result := &analysis.Result{
-		InputBytes:  100,
-		TotalLines:  10,
-		Matched:     8,
-		Filtered:    2,
-		Malformed:   0,
-		Records:     []analysis.Record{
-			{Method: "GET", Path: "/api/test", Status: 200, Size: 100},
-			{Method: "POST", Path: "/api/test", Status: 201, Size: 200},
+		InputBytes: 100,
+		TotalLines: 10,
+		Matched:    2,
+		Filtered:   2,
+		Malformed:  0,
+		Records: []analysis.Record{
+			{Timestamp: start, Method: "GET", Path: "/api/test", Status: 200, Size: 100},
+			{Timestamp: start.Add(2 * time.Second), Method: "POST", Path: "/api/test", Status: 201, Size: 200},
 		},
 	}
 
-	sum, err := Compute(result, 2*time.Second)
+	sum, err := Compute(result)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -34,8 +35,8 @@ func TestCompute_Basic(t *testing.T) {
 	if sum.TotalLines != 10 {
 		t.Errorf("expected TotalLines 10, got %d", sum.TotalLines)
 	}
-	if sum.MatchedLines != 8 {
-		t.Errorf("expected MatchedLines 8, got %d", sum.MatchedLines)
+	if sum.MatchedLines != 2 {
+		t.Errorf("expected MatchedLines 2, got %d", sum.MatchedLines)
 	}
 	if sum.FilteredLines != 2 {
 		t.Errorf("expected FilteredLines 2, got %d", sum.FilteredLines)
@@ -43,34 +44,37 @@ func TestCompute_Basic(t *testing.T) {
 	if sum.RowCount != 2 {
 		t.Errorf("expected RowCount 2, got %d", sum.RowCount)
 	}
-	if sum.RequestsTotal != 8 {
-		t.Errorf("expected RequestsTotal 8, got %d", sum.RequestsTotal)
+	if sum.RequestsTotal != 2 {
+		t.Errorf("expected RequestsTotal 2, got %d", sum.RequestsTotal)
 	}
-	if sum.RequestsPerSec != 4.0 {
-		t.Errorf("expected RequestsPerSec 4.0, got %f", sum.RequestsPerSec)
+	if sum.RequestsPerSec != 1.0 {
+		t.Errorf("expected RequestsPerSec 1.0, got %f", sum.RequestsPerSec)
 	}
 }
 
 func TestCompute_NilResult(t *testing.T) {
-	_, err := Compute(nil, time.Second)
+	_, err := Compute(nil)
 	if err == nil {
 		t.Error("expected error for nil result")
 	}
 }
 
-func TestCompute_ZeroDuration(t *testing.T) {
+func TestCompute_ZeroSpan(t *testing.T) {
 	result := &analysis.Result{
-		Matched: 10,
-		Records: make([]analysis.Record, 10),
+		Matched: 2,
+		Records: []analysis.Record{
+			{Timestamp: time.Date(2000, time.October, 10, 13, 55, 36, 0, time.UTC), Method: "GET", Path: "/same"},
+			{Timestamp: time.Date(2000, time.October, 10, 13, 55, 36, 0, time.UTC), Method: "GET", Path: "/same"},
+		},
 	}
 
-	sum, err := Compute(result, 0)
+	sum, err := Compute(result)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	if sum.RequestsPerSec != 0 {
-		t.Errorf("expected 0 RequestsPerSec for zero duration, got %f", sum.RequestsPerSec)
+		t.Errorf("expected 0 RequestsPerSec for zero timestamp span, got %f", sum.RequestsPerSec)
 	}
 }
 
@@ -87,7 +91,7 @@ func TestCompute_RankingOrder(t *testing.T) {
 		},
 	}
 
-	sum, err := Compute(result, time.Second)
+	sum, err := Compute(result)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -122,7 +126,7 @@ func TestCompute_TieBreakOrdering(t *testing.T) {
 		},
 	}
 
-	sum, err := Compute(result, time.Second)
+	sum, err := Compute(result)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -157,7 +161,7 @@ func TestCompute_PercentageCalculation(t *testing.T) {
 		},
 	}
 
-	sum, err := Compute(result, time.Second)
+	sum, err := Compute(result)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -186,7 +190,7 @@ func TestCompute_DeterministicReordering(t *testing.T) {
 
 	var firstOrder []string
 	for i := 0; i < 3; i++ {
-		sum, err := Compute(result, time.Second)
+		sum, err := Compute(result)
 		if err != nil {
 			t.Fatalf("iteration %d: unexpected error: %v", i, err)
 		}
@@ -206,5 +210,26 @@ func TestCompute_DeterministicReordering(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestCompute_RequestsPerSecUsesRecordTimestampSpan(t *testing.T) {
+	start := time.Date(2000, time.October, 10, 13, 55, 36, 0, time.UTC)
+	result := &analysis.Result{
+		Matched: 3,
+		Records: []analysis.Record{
+			{Timestamp: start, Method: "GET", Path: "/alpha"},
+			{Timestamp: start.Add(5 * time.Second), Method: "GET", Path: "/beta"},
+			{Timestamp: start.Add(10 * time.Second), Method: "GET", Path: "/gamma"},
+		},
+	}
+
+	sum, err := Compute(result)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if sum.RequestsPerSec != 0.3 {
+		t.Errorf("expected RequestsPerSec 0.3 from first-to-last record span, got %f", sum.RequestsPerSec)
 	}
 }
