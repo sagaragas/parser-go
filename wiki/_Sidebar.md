@@ -5,4 +5,5 @@
 - [Architecture](./Architecture)
 - [Benchmark methodology](./Benchmark-Methodology)
 - [Corpus and sanitization](./Corpus-and-Sanitization)
+- [Homelab validation](./Homelab-Validation)
 - [Evidence index](./Evidence-Index)

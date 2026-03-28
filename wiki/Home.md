@@ -12,6 +12,7 @@ This repository contains a from-scratch Go implementation that analyzes web serv
 - [Architecture](./Architecture.md) - How the system is organized
 - [Benchmark methodology](./Benchmark-Methodology.md) - How we measure correctness and performance
 - [Corpus and sanitization](./Corpus-and-Sanitization.md) - Where our test data comes from and how we keep it safe to share
+- [Homelab validation](./Homelab-Validation.md) - How we test against real-world traffic in the homelab
 - [Evidence index](./Evidence-Index.md) - Links to measured results and benchmark bundles
 
 ## Project status
