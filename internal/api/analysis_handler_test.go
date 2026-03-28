@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"parsergo/internal/analysis"
 	"parsergo/internal/job"
 )
 
@@ -296,6 +297,53 @@ func TestOversizedInput(t *testing.T) {
 	json.Unmarshal(w.Body.Bytes(), &errResp)
 	if errResp.Code != ErrCodeInputTooLarge {
 		t.Errorf("expected error code %s, got %s", ErrCodeInputTooLarge, errResp.Code)
+	}
+}
+
+func TestOversizedMultipartFields(t *testing.T) {
+	validLogLine := `127.0.0.1 - - [10/Oct/2000:13:55:36 -0700] "GET /test HTTP/1.0" 200 100`
+	oversizedValue := strings.Repeat("x", 1025)
+
+	tests := []struct {
+		name  string
+		field string
+	}{
+		{name: "format field", field: "format"},
+		{name: "profile field", field: "profile"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler, store := setupTestHandler()
+
+			var buf bytes.Buffer
+			writer := multipart.NewWriter(&buf)
+			part, _ := writer.CreateFormFile("file", "access.log")
+			part.Write([]byte(validLogLine))
+			writer.WriteField(tt.field, oversizedValue)
+			writer.Close()
+
+			req := httptest.NewRequest(http.MethodPost, "/v1/analyses", &buf)
+			req.Header.Set("Content-Type", writer.FormDataContentType())
+			w := httptest.NewRecorder()
+
+			handler.handleAnalyses(w, req)
+
+			if w.Code != http.StatusRequestEntityTooLarge {
+				t.Fatalf("expected status %d, got %d: %s", http.StatusRequestEntityTooLarge, w.Code, w.Body.String())
+			}
+
+			var errResp APIError
+			if err := json.Unmarshal(w.Body.Bytes(), &errResp); err != nil {
+				t.Fatalf("failed to unmarshal error response: %v", err)
+			}
+			if errResp.Code != ErrCodeInputTooLarge {
+				t.Fatalf("expected error code %s, got %s", ErrCodeInputTooLarge, errResp.Code)
+			}
+			if len(store.List()) != 0 {
+				t.Fatalf("expected no jobs to be created, got %d", len(store.List()))
+			}
+		})
 	}
 }
 
@@ -631,6 +679,101 @@ func TestEndToEndAnalysis(t *testing.T) {
 	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
 		t.Errorf("expected Content-Type text/html, got %s", ct)
 	}
+}
+
+func TestJobTransitionsPreserveCreatedAt(t *testing.T) {
+	t.Run("successful jobs preserve created_at", func(t *testing.T) {
+		handler, store := setupTestHandler()
+
+		logData := `127.0.0.1 - - [10/Oct/2000:13:55:36 -0700] "GET /index.html HTTP/1.0" 200 1000`
+
+		var buf bytes.Buffer
+		writer := multipart.NewWriter(&buf)
+		part, _ := writer.CreateFormFile("file", "access.log")
+		part.Write([]byte(logData))
+		writer.Close()
+
+		req := httptest.NewRequest(http.MethodPost, "/v1/analyses", &buf)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		w := httptest.NewRecorder()
+
+		handler.handleAnalyses(w, req)
+
+		if w.Code != http.StatusAccepted {
+			t.Fatalf("expected status %d, got %d: %s", http.StatusAccepted, w.Code, w.Body.String())
+		}
+
+		var resp AnalysisResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("failed to unmarshal response: %v", err)
+		}
+
+		if resp.CreatedAt.IsZero() {
+			t.Fatal("expected accepted response to include CreatedAt")
+		}
+
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			statusReq := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/v1/analyses/%s", resp.ID), nil)
+			statusResp := httptest.NewRecorder()
+			handler.handleAnalysisDetail(statusResp, statusReq)
+
+			var status JobStatusResponse
+			if err := json.Unmarshal(statusResp.Body.Bytes(), &status); err != nil {
+				t.Fatalf("failed to unmarshal status response: %v", err)
+			}
+
+			switch status.State {
+			case "succeeded":
+				if !status.CreatedAt.Equal(resp.CreatedAt) {
+					t.Fatalf("expected CreatedAt %s after transitions, got %s", resp.CreatedAt, status.CreatedAt)
+				}
+				stored, ok := store.Get(resp.ID)
+				if !ok {
+					t.Fatal("expected stored job to exist")
+				}
+				if !stored.CreatedAt.Equal(resp.CreatedAt) {
+					t.Fatalf("expected stored CreatedAt %s, got %s", resp.CreatedAt, stored.CreatedAt)
+				}
+				return
+			case "failed":
+				t.Fatalf("job failed unexpectedly: %+v", status.Error)
+			}
+
+			time.Sleep(50 * time.Millisecond)
+		}
+
+		t.Fatal("timed out waiting for job to succeed")
+	})
+
+	t.Run("failed jobs preserve created_at", func(t *testing.T) {
+		handler, store := setupTestHandler()
+		createdAt := time.Unix(1_700_000_100, 0).UTC()
+		jobID := "test_failed_created_at"
+
+		store.Create(&job.Job{
+			ID:        jobID,
+			State:     job.StateQueued,
+			CreatedAt: createdAt,
+			UpdatedAt: createdAt,
+		})
+
+		handler.processJob(jobID, "unsupported", string(analysis.ProfileDefault), []byte("ignored"))
+
+		stored, ok := store.Get(jobID)
+		if !ok {
+			t.Fatal("expected stored job to exist")
+		}
+		if stored.State != job.StateFailed {
+			t.Fatalf("expected failed state, got %s", stored.State)
+		}
+		if !stored.CreatedAt.Equal(createdAt) {
+			t.Fatalf("expected CreatedAt %s after failure, got %s", createdAt, stored.CreatedAt)
+		}
+		if stored.Error == nil {
+			t.Fatal("expected failed job error details")
+		}
+	})
 }
 
 // TestDeterministicOrdering verifies that ranked requests have stable ordering (VAL-SVC-009)

@@ -64,10 +64,24 @@ func (s *Store) Create(j *Job) {
 func (s *Store) Update(j *Job) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.jobs[j.ID]; !ok {
+	existing, ok := s.jobs[j.ID]
+	if !ok {
 		return false
 	}
-	s.jobs[j.ID] = j
+
+	updated := *existing
+	if j.State != "" {
+		updated.State = j.State
+	}
+	if !j.CreatedAt.IsZero() {
+		updated.CreatedAt = j.CreatedAt
+	}
+	if !j.UpdatedAt.IsZero() {
+		updated.UpdatedAt = j.UpdatedAt
+	}
+	updated.Error = j.Error
+
+	s.jobs[j.ID] = &updated
 	return true
 }
 

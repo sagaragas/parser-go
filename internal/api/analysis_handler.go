@@ -36,6 +36,8 @@ const (
 	ErrCodeServiceUnavailable   ErrorCode = "service_unavailable"
 )
 
+const multipartTextFieldLimit int64 = 1024
+
 // APIError represents a structured client error response.
 type APIError struct {
 	Code    ErrorCode `json:"code"`
@@ -266,20 +268,18 @@ func (h *Handler) handleMultipartSubmission(w http.ResponseWriter, r *http.Reque
 			inputData = data
 
 		case "format":
-			data, err := io.ReadAll(part)
-			if err != nil {
-				h.writeError(w, http.StatusBadRequest, ErrCodeInvalidInput, "failed to read format")
+			value, ok := h.readMultipartTextField(w, part, "format")
+			if !ok {
 				return
 			}
-			format = strings.TrimSpace(string(data))
+			format = value
 
 		case "profile":
-			data, err := io.ReadAll(part)
-			if err != nil {
-				h.writeError(w, http.StatusBadRequest, ErrCodeInvalidInput, "failed to read profile")
+			value, ok := h.readMultipartTextField(w, part, "profile")
+			if !ok {
 				return
 			}
-			profile = strings.TrimSpace(string(data))
+			profile = value
 		}
 
 		part.Close()
@@ -291,6 +291,20 @@ func (h *Handler) handleMultipartSubmission(w http.ResponseWriter, r *http.Reque
 	}
 
 	h.createAndRunJob(w, r.Context(), format, profile, inputData)
+}
+
+func (h *Handler) readMultipartTextField(w http.ResponseWriter, part *multipart.Part, fieldName string) (string, bool) {
+	data, err := io.ReadAll(io.LimitReader(part, multipartTextFieldLimit+1))
+	if err != nil {
+		h.writeError(w, http.StatusBadRequest, ErrCodeInvalidInput, fmt.Sprintf("failed to read %s", fieldName))
+		return "", false
+	}
+	if int64(len(data)) > multipartTextFieldLimit {
+		h.writeError(w, http.StatusRequestEntityTooLarge, ErrCodeInputTooLarge,
+			fmt.Sprintf("%s exceeds maximum size of %d bytes", fieldName, multipartTextFieldLimit))
+		return "", false
+	}
+	return strings.TrimSpace(string(data)), true
 }
 
 // handleJSONSubmission processes application/json submissions.
