@@ -1,0 +1,16 @@
+{
+  "id": "canonical-summary-v1",
+  "summary_fields": [
+    "requests_total",
+    "requests_per_sec",
+    "ranked_requests"
+  ],
+  "workload_fields": [
+    "input_bytes",
+    "total_lines",
+    "matched_lines",
+    "filtered_lines",
+    "rejected_lines",
+    "row_count"
+  ]
+}

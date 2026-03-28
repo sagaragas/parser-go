@@ -1,0 +1,77 @@
+{
+  "id": "synthetic-small",
+  "description": "Synthetic combined-log parity scenario with one malformed line and one filtered health check.",
+  "corpus": {
+    "id": "synthetic-small-v1",
+    "path": "benchmark/corpora/synthetic/small/access.log",
+    "format": "combined",
+    "profile": "default"
+  },
+  "normalization": {
+    "id": "canonical-summary-v1",
+    "path": "benchmark/normalization/canonical-summary-v1.json"
+  },
+  "baseline": {
+    "name": "legacy-python",
+    "command": [
+      "{{baseline_python}}",
+      "{{repo_root}}/benchmark/support/legacy_baseline_adapter.py",
+      "--legacy-repo",
+      "/root/web-log-parser",
+      "--corpus",
+      "{{corpus}}",
+      "--out",
+      "{{output}}"
+    ],
+    "version_command": [
+      "{{baseline_python}}",
+      "--version"
+    ],
+    "required_paths": [
+      "/root/web-log-parser",
+      "{{repo_root}}/benchmark/support/legacy_baseline_adapter.py"
+    ],
+    "repo_path": "/root/web-log-parser",
+    "controls": {
+      "warmup_iterations": 1,
+      "measured_iterations": 2,
+      "cache_posture": "cold",
+      "concurrency": 1,
+      "max_procs": 1
+    }
+  },
+  "rewrite": {
+    "name": "parsergo-rewrite",
+    "command": [
+      "{{go_binary}}",
+      "run",
+      "./cmd/bench",
+      "impl",
+      "rewrite",
+      "--corpus",
+      "{{corpus}}",
+      "--out",
+      "{{output}}",
+      "--format",
+      "{{format}}",
+      "--profile",
+      "{{profile}}"
+    ],
+    "version_command": [
+      "{{go_binary}}",
+      "version"
+    ],
+    "working_dir": "{{repo_root}}",
+    "required_paths": [
+      "{{repo_root}}/cmd/bench/main.go"
+    ],
+    "repo_path": "{{repo_root}}",
+    "controls": {
+      "warmup_iterations": 1,
+      "measured_iterations": 2,
+      "cache_posture": "cold",
+      "concurrency": 1,
+      "max_procs": 1
+    }
+  }
+}
