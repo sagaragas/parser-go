@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -117,6 +118,103 @@ func TestReportsIndexWithReports(t *testing.T) {
 	}
 }
 
+func TestSortReportIndexItemsNewestFirstAndStableByID(t *testing.T) {
+	createdAt := time.Date(2026, time.March, 28, 12, 0, 0, 0, time.UTC)
+	reports := []ReportIndexItem{
+		{ID: "report-c", CreatedAt: createdAt},
+		{ID: "report-a", CreatedAt: createdAt},
+		{ID: "report-oldest", CreatedAt: createdAt.Add(-time.Hour)},
+		{ID: "report-newest", CreatedAt: createdAt.Add(time.Hour)},
+	}
+
+	sortReportIndexItems(reports)
+
+	got := make([]string, 0, len(reports))
+	for _, report := range reports {
+		got = append(got, report.ID)
+	}
+
+	want := []string{"report-newest", "report-a", "report-c", "report-oldest"}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d reports, got %d", len(want), len(got))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("expected order %v, got %v", want, got)
+		}
+	}
+}
+
+func TestReportsIndexNewestFirst(t *testing.T) {
+	handler, analysisHandler, store := setupReportHandler()
+
+	base := time.Date(2026, time.March, 28, 12, 0, 0, 0, time.UTC)
+	reports := []struct {
+		id        string
+		createdAt time.Time
+	}{
+		{id: "report-oldest", createdAt: base.Add(-2 * time.Hour)},
+		{id: "report-middle", createdAt: base},
+		{id: "report-newest", createdAt: base.Add(2 * time.Hour)},
+	}
+
+	for _, report := range reports {
+		store.Create(&job.Job{
+			ID:        report.id,
+			State:     job.StateSucceeded,
+			CreatedAt: report.createdAt,
+			UpdatedAt: report.createdAt,
+		})
+
+		analysisHandler.workspacesMu.Lock()
+		analysisHandler.workspaces[report.id] = &Workspace{
+			ID:    report.id,
+			JobID: report.id,
+			Summary: &summary.Summary{
+				RequestsTotal: 10,
+				TotalLines:    10,
+				MatchedLines:  10,
+			},
+		}
+		analysisHandler.workspacesMu.Unlock()
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/reports", nil)
+	w := httptest.NewRecorder()
+
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux)
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	body := w.Body.String()
+	positions := make(map[string]int, len(reports))
+	for _, report := range reports {
+		positions[report.id] = strings.Index(body, report.id)
+		if positions[report.id] < 0 {
+			t.Fatalf("expected report %q in body", report.id)
+		}
+	}
+
+	order := make([]string, 0, len(positions))
+	for id := range positions {
+		order = append(order, id)
+	}
+	sort.Slice(order, func(i, j int) bool {
+		return positions[order[i]] < positions[order[j]]
+	})
+
+	want := []string{"report-newest", "report-middle", "report-oldest"}
+	for i := range want {
+		if order[i] != want[i] {
+			t.Fatalf("expected newest-first order %v, got %v", want, order)
+		}
+	}
+}
+
 // TestReportsIndexExcludesNonSucceeded tests that only succeeded jobs appear in index (VAL-RPT-001)
 func TestReportsIndexExcludesNonSucceeded(t *testing.T) {
 	handler, analysisHandler, store := setupReportHandler()
@@ -178,13 +276,13 @@ func TestReportDetailSuccess(t *testing.T) {
 
 	// Add summary with ranked requests
 	sum := &summary.Summary{
-		RequestsTotal: 100,
+		RequestsTotal:  100,
 		RequestsPerSec: 50.5,
-		TotalLines:    100,
-		MatchedLines:  100,
-		FilteredLines: 0,
-		RowCount:      2,
-		InputBytes:    1024,
+		TotalLines:     100,
+		MatchedLines:   100,
+		FilteredLines:  0,
+		RowCount:       2,
+		InputBytes:     1024,
 		RankedRequests: []summary.RankedRequest{
 			{Path: "/api/users", Method: "GET", Count: 50, Percentage: 50.0},
 			{Path: "/api/posts", Method: "POST", Count: 30, Percentage: 30.0},
@@ -449,6 +547,81 @@ func TestReportDetailSelfContained(t *testing.T) {
 	if strings.Contains(body, `<script src="http`) ||
 		strings.Contains(body, `<link href="http`) {
 		t.Error("report references external resources via http")
+	}
+
+	if strings.Contains(body, "fetch(") || strings.Contains(body, "XMLHttpRequest") {
+		t.Error("report should not fetch remote data to render charts")
+	}
+}
+
+func TestReportDetailIncludesInlineCharts(t *testing.T) {
+	handler, analysisHandler, store := setupReportHandler()
+
+	jobID := "test_charts"
+	store.Create(&job.Job{
+		ID:        jobID,
+		State:     job.StateSucceeded,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	})
+
+	sum := &summary.Summary{
+		RequestsTotal:  120,
+		RequestsPerSec: 30,
+		TotalLines:     150,
+		MatchedLines:   120,
+		FilteredLines:  20,
+		RowCount:       8,
+		InputBytes:     2048,
+		RankedRequests: []summary.RankedRequest{
+			{Path: "/healthz", Method: "GET", Count: 60, Percentage: 50.0},
+			{Path: "/reports/123", Method: "GET", Count: 40, Percentage: 33.3},
+			{Path: "/submit", Method: "POST", Count: 20, Percentage: 16.7},
+		},
+	}
+	analysisHandler.workspacesMu.Lock()
+	analysisHandler.workspaces[jobID] = &Workspace{
+		ID:      jobID,
+		JobID:   jobID,
+		Summary: sum,
+	}
+	analysisHandler.workspacesMu.Unlock()
+
+	req := httptest.NewRequest(http.MethodGet, "/reports/"+jobID, nil)
+	w := httptest.NewRecorder()
+
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux)
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "Top Request Share") {
+		t.Fatal("expected top request chart heading")
+	}
+	if !strings.Contains(body, "Line Processing Breakdown") {
+		t.Fatal("expected line breakdown chart heading")
+	}
+	if strings.Count(body, "<svg") < 2 {
+		t.Fatalf("expected at least two inline SVG charts, got body: %s", body)
+	}
+	if !strings.Contains(body, "Showing the top 3 ranked request rows from 3 total.") {
+		t.Fatal("expected chart note describing rendered ranked rows")
+	}
+	if !strings.Contains(body, "Matched lines: 120") {
+		t.Fatal("expected matched-line legend entry")
+	}
+	if !strings.Contains(body, "Filtered lines: 20") {
+		t.Fatal("expected filtered-line legend entry")
+	}
+	if !strings.Contains(body, "Unmatched lines: 10") {
+		t.Fatal("expected unmatched-line legend entry")
+	}
+	if !strings.Contains(body, "GET /healthz") {
+		t.Fatal("expected request chart label content")
 	}
 }
 

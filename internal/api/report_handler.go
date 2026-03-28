@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -66,9 +67,7 @@ func (h *ReportHandler) handleReportsIndex(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Sort by creation time, newest first
-	for i, j := 0, len(reports)-1; i < j; i, j = i+1, j-1 {
-		reports[i], reports[j] = reports[j], reports[i]
-	}
+	sortReportIndexItems(reports)
 
 	// Generate HTML page
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -397,6 +396,75 @@ func (h *ReportHandler) generateReportDetailHTML(jobID string, sum *summary.Summ
             border: 1px solid #ddd;
             border-radius: 8px;
             padding: 25px;
+            margin-bottom: 30px;
+        }
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .chart-card {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 25px;
+        }
+        .chart-title {
+            font-size: 1.1em;
+            color: #2c3e50;
+            margin-top: 0;
+            margin-bottom: 8px;
+        }
+        .chart-help {
+            color: #5f6b7a;
+            font-size: 0.9em;
+            margin-top: 0;
+            margin-bottom: 20px;
+        }
+        .chart-svg {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        .chart-svg text {
+            fill: #243447;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-size: 13px;
+        }
+        .chart-svg .svg-axis-label {
+            fill: #64748b;
+            font-size: 12px;
+        }
+        .chart-svg .svg-value {
+            font-weight: 600;
+        }
+        .chart-legend {
+            list-style: none;
+            padding: 0;
+            margin: 16px 0 0;
+        }
+        .chart-legend li {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: #4a5568;
+            margin-top: 8px;
+        }
+        .legend-swatch {
+            width: 12px;
+            height: 12px;
+            border-radius: 999px;
+            display: inline-block;
+            flex: 0 0 auto;
+        }
+        .legend-matched { background: #2563eb; }
+        .legend-filtered { background: #f59e0b; }
+        .legend-unmatched { background: #94a3b8; }
+        .chart-note {
+            margin-top: 14px;
+            color: #64748b;
+            font-size: 0.85em;
         }
         .top-requests-title {
             font-size: 1.2em;
@@ -550,6 +618,8 @@ func (h *ReportHandler) generateReportDetailHTML(jobID string, sum *summary.Summ
         </div>
     </div>
 
+    ` + generateChartsHTML(sum) + `
+
     <div class="top-requests-section">
         <h2 class="top-requests-title">Top Requests by Frequency</h2>
 `
@@ -657,6 +727,172 @@ func (h *ReportHandler) writeMissingReport(w http.ResponseWriter) {
     <a href="/reports" class="back-link">View All Reports</a>
 </body>
 </html>`))
+}
+
+func sortReportIndexItems(reports []ReportIndexItem) {
+	sort.Slice(reports, func(i, j int) bool {
+		if reports[i].CreatedAt.Equal(reports[j].CreatedAt) {
+			return reports[i].ID < reports[j].ID
+		}
+		return reports[i].CreatedAt.After(reports[j].CreatedAt)
+	})
+}
+
+func generateChartsHTML(sum *summary.Summary) string {
+	return `    <div class="charts-grid">
+        <section class="chart-card">
+            <h2 class="chart-title">Top Request Share</h2>
+            <p class="chart-help">Self-contained inline SVG rendered from the report summary with no external scripts or data fetches.</p>
+            ` + renderTopRequestsChart(sum) + `
+        </section>
+        <section class="chart-card">
+            <h2 class="chart-title">Line Processing Breakdown</h2>
+            <p class="chart-help">Matched, filtered, and remaining lines shown directly from workload accounting data embedded in the report.</p>
+            ` + renderLineBreakdownChart(sum) + `
+        </section>
+    </div>
+`
+}
+
+func renderTopRequestsChart(sum *summary.Summary) string {
+	if len(sum.RankedRequests) == 0 {
+		return `<p class="no-data">No ranked request data is available for chart rendering.</p>`
+	}
+
+	ranked := sum.RankedRequests
+	if len(ranked) > 6 {
+		ranked = ranked[:6]
+	}
+
+	maxCount := ranked[0].Count
+	if maxCount <= 0 {
+		maxCount = 1
+	}
+
+	const (
+		chartWidth   = 760
+		labelX       = 20
+		barStartX    = 280
+		barWidth     = 330
+		rowHeight    = 48
+		topPadding   = 44
+		bottomMargin = 26
+	)
+
+	chartHeight := topPadding + len(ranked)*rowHeight + bottomMargin
+	var builder strings.Builder
+	builder.WriteString(fmt.Sprintf(`<svg class="chart-svg" viewBox="0 0 %d %d" role="img" aria-labelledby="request-share-chart-title request-share-chart-desc">`, chartWidth, chartHeight))
+	builder.WriteString(`<title id="request-share-chart-title">Top request share</title>`)
+	builder.WriteString(fmt.Sprintf(`<desc id="request-share-chart-desc">Bar chart showing the top %d ranked requests by frequency.</desc>`, len(ranked)))
+
+	for index, req := range ranked {
+		y := topPadding + index*rowHeight
+		width := int(float64(req.Count) / float64(maxCount) * float64(barWidth))
+		if req.Count > 0 && width < 6 {
+			width = 6
+		}
+
+		label := truncateLabel(req.Method+" "+req.Path, 32)
+		builder.WriteString(fmt.Sprintf(`<text x="%d" y="%d">%s</text>`, labelX, y+17, escapeHTML(label)))
+		builder.WriteString(fmt.Sprintf(`<rect x="%d" y="%d" width="%d" height="22" rx="6" fill="#e2e8f0"></rect>`, barStartX, y, barWidth))
+		builder.WriteString(fmt.Sprintf(`<rect x="%d" y="%d" width="%d" height="22" rx="6" fill="#2563eb"></rect>`, barStartX, y, width))
+		builder.WriteString(fmt.Sprintf(`<text class="svg-value" x="%d" y="%d">%s • %.1f%%</text>`, barStartX+width+12, y+17, formatNumber(req.Count), req.Percentage))
+	}
+
+	builder.WriteString(`</svg>`)
+	builder.WriteString(fmt.Sprintf(`<p class="chart-note">Showing the top %d ranked request rows from %d total.</p>`, len(ranked), len(sum.RankedRequests)))
+	return builder.String()
+}
+
+func renderLineBreakdownChart(sum *summary.Summary) string {
+	matched := sum.MatchedLines
+	if matched < 0 {
+		matched = 0
+	}
+	filtered := sum.FilteredLines
+	if filtered < 0 {
+		filtered = 0
+	}
+	unmatched := sum.TotalLines - matched - filtered
+	if unmatched < 0 {
+		unmatched = 0
+	}
+
+	total := matched + filtered + unmatched
+	if total <= 0 {
+		return `<p class="no-data">No workload accounting data is available for chart rendering.</p>`
+	}
+
+	const (
+		chartWidth = 760
+		barX       = 20
+		barY       = 44
+		barWidth   = 700
+		barHeight  = 28
+	)
+
+	type segment struct {
+		label string
+		value int
+		fill  string
+	}
+
+	segments := []segment{
+		{label: "Matched", value: matched, fill: "#2563eb"},
+		{label: "Filtered", value: filtered, fill: "#f59e0b"},
+		{label: "Unmatched", value: unmatched, fill: "#94a3b8"},
+	}
+
+	var builder strings.Builder
+	builder.WriteString(fmt.Sprintf(`<svg class="chart-svg" viewBox="0 0 %d 120" role="img" aria-labelledby="line-breakdown-chart-title line-breakdown-chart-desc">`, chartWidth))
+	builder.WriteString(`<title id="line-breakdown-chart-title">Line processing breakdown</title>`)
+	builder.WriteString(`<desc id="line-breakdown-chart-desc">Stacked bar chart showing matched, filtered, and unmatched lines from the report summary.</desc>`)
+	builder.WriteString(fmt.Sprintf(`<text class="svg-axis-label" x="%d" y="24">0</text>`, barX))
+	builder.WriteString(fmt.Sprintf(`<text class="svg-axis-label" x="%d" y="24">%s total lines</text>`, barX+barWidth-90, escapeHTML(formatNumber(int64(sum.TotalLines)))))
+
+	x := barX
+	for _, seg := range segments {
+		if seg.value <= 0 {
+			continue
+		}
+
+		width := int(float64(seg.value) / float64(total) * float64(barWidth))
+		if width < 4 {
+			width = 4
+		}
+		if x+width > barX+barWidth {
+			width = barX + barWidth - x
+		}
+
+		builder.WriteString(fmt.Sprintf(`<rect x="%d" y="%d" width="%d" height="%d" rx="8" fill="%s"></rect>`, x, barY, width, barHeight, seg.fill))
+		if width > 78 {
+			builder.WriteString(fmt.Sprintf(`<text class="svg-value" x="%d" y="%d">%s</text>`, x+10, barY+18, escapeHTML(seg.label)))
+		}
+		x += width
+	}
+
+	builder.WriteString(`</svg>`)
+	builder.WriteString(`<ul class="chart-legend">`)
+	for _, seg := range segments {
+		builder.WriteString(fmt.Sprintf(`<li><span class="legend-swatch legend-%s"></span>%s lines: %s</li>`,
+			strings.ToLower(seg.label),
+			escapeHTML(seg.label),
+			formatNumber(int64(seg.value)),
+		))
+	}
+	builder.WriteString(`</ul>`)
+	return builder.String()
+}
+
+func truncateLabel(value string, maxRunes int) string {
+	runes := []rune(value)
+	if len(runes) <= maxRunes {
+		return value
+	}
+	if maxRunes <= 1 {
+		return "…"
+	}
+	return string(runes[:maxRunes-1]) + "…"
 }
 
 // writeNotReadyReport writes a readable error for reports not yet ready.
@@ -919,4 +1155,3 @@ func formatDuration(d time.Duration) string {
 	}
 	return fmt.Sprintf("%.2f s", d.Seconds())
 }
-
