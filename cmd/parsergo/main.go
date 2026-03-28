@@ -34,15 +34,19 @@ func main() {
 	jobStore := job.NewStore()
 
 	// Create API handler
-	handler := api.NewHandler(api.HandlerConfig{
+	analysisHandler := api.NewHandler(api.HandlerConfig{
 		Logger:       logger,
 		JobStore:     jobStore,
 		MaxInputSize: 10 * 1024 * 1024, // 10MB
 	})
 
+	// Create report handler
+	reportHandler := api.NewReportHandler(analysisHandler, logger)
+
 	// Register routes
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux)
+	analysisHandler.RegisterRoutes(mux)
+	reportHandler.RegisterRoutes(mux)
 
 	srv := &http.Server{
 		Addr:         addr,
@@ -56,7 +60,7 @@ func main() {
 	defer stop()
 
 	// Set ready state after initialization (VAL-SVC-002)
-	handler.SetReady(true)
+	analysisHandler.SetReady(true)
 	logger.Info("service ready")
 
 	go func() {

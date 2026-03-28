@@ -243,6 +243,7 @@ func (h *Handler) handleMultipartSubmission(w http.ResponseWriter, r *http.Reque
 		switch fieldName {
 		case "file":
 			// Validate filename (VAL-SVC-007)
+			// FileName() may return empty for form fields, but we validate if provided
 			if fileName != "" {
 				if err := h.validateFilename(fileName); err != nil {
 					h.writeError(w, http.StatusUnprocessableEntity, ErrCodeUnsafeFilename, err.Error())
@@ -308,22 +309,35 @@ func (h *Handler) handleJSONSubmission(w http.ResponseWriter, r *http.Request) {
 
 // validateFilename checks for traversal attacks (VAL-SVC-007).
 func (h *Handler) validateFilename(filename string) error {
-	// Clean the path
-	clean := filepath.Clean(filename)
-
-	// Check for absolute paths
-	if filepath.IsAbs(clean) {
-		return fmt.Errorf("absolute paths not allowed")
+	if filename == "" {
+		return nil // No filename provided, will use server-generated name
 	}
 
-	// Check for traversal sequences
-	if strings.Contains(clean, "..") {
+	// Check original filename for parent directory references
+	// This catches traversal attempts before path cleaning
+	if strings.Contains(filename, "..") {
 		return fmt.Errorf("path traversal not allowed")
 	}
 
-	// Check for leading slashes or parent references
+	// Check for absolute paths in original
+	if filepath.IsAbs(filename) {
+		return fmt.Errorf("absolute paths not allowed")
+	}
+
+	// Check for leading slashes
 	if strings.HasPrefix(filename, "/") || strings.HasPrefix(filename, "\\") {
 		return fmt.Errorf("absolute paths not allowed")
+	}
+
+	// Clean the path and verify it doesn't escape to root
+	clean := filepath.Clean(filename)
+
+	// After cleaning, check if it became absolute or contains traversal
+	if filepath.IsAbs(clean) {
+		return fmt.Errorf("absolute paths not allowed")
+	}
+	if strings.HasPrefix(clean, "..") {
+		return fmt.Errorf("path traversal not allowed")
 	}
 
 	return nil
