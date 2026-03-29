@@ -55,5 +55,5 @@ coverage.out
 # Local toolchain (installed by .factory/init.sh)
 /.tools/
 
-# Keep .factory - it's mission infrastructure
-!.factory/
+# Factory mission infrastructure (local only)
+.factory/
