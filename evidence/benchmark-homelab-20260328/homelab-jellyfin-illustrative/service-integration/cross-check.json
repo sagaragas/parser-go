@@ -1,7 +1,7 @@
 {
   "scenario_id": "homelab-jellyfin-illustrative",
   "corpus_sha256": "27d75747c984391a52fba754c8f9bde1cc83cb6626d6832236fbd5378c0a9a87",
-  "rewrite_git_revision": "4dee015889ba48926a682468c8a2f446dc4d1496",
+  "rewrite_git_revision": "dc01cf104ef86c2d3a755b84bcae1203e1a4b15d",
   "job_id": "job_1774742902_48035203",
   "submission_location": "/v1/analyses/job_1774742902_48035203",
   "report_url": "/reports/job_1774742902_48035203",

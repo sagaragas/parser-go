@@ -66,7 +66,7 @@
     ],
     "working_dir": "\u003crepo-root\u003e",
     "version": "go version go1.26.0 linux/amd64",
-    "git_revision": "4dee015889ba48926a682468c8a2f446dc4d1496",
+    "git_revision": "dc01cf104ef86c2d3a755b84bcae1203e1a4b15d",
     "controls": {
       "warmup_iterations": 1,
       "measured_iterations": 2,

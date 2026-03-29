@@ -1,5 +1,5 @@
 {
-  "rewrite_git_revision": "4dee015889ba48926a682468c8a2f446dc4d1496",
+  "rewrite_git_revision": "dc01cf104ef86c2d3a755b84bcae1203e1a4b15d",
   "passed": true,
   "required_members": [
     "manifest.json",
