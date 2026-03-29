@@ -621,6 +621,172 @@ func TestBenchHelperProcess(t *testing.T) {
 	os.Exit(0)
 }
 
+func TestBenchRunRequiresExplicitBaselinePythonOverride(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("BENCH_BASELINE_PYTHON", "")
+	t.Setenv("BENCH_LEGACY_REPO", tempDir)
+
+	corpusPath := filepath.Join(tempDir, "access.log")
+	if err := os.WriteFile(corpusPath, []byte("synthetic corpus\n"), 0o644); err != nil {
+		t.Fatalf("write corpus: %v", err)
+	}
+
+	normalizationPath := filepath.Join(tempDir, "normalization.json")
+	if err := os.WriteFile(normalizationPath, []byte(`{
+  "id": "canonical-summary-v1",
+  "summary_fields": ["requests_total"],
+  "workload_fields": ["input_bytes"]
+}`), 0o644); err != nil {
+		t.Fatalf("write normalization: %v", err)
+	}
+
+	legacyRepo := filepath.Join(tempDir, "legacy-repo")
+	if err := os.MkdirAll(legacyRepo, 0o755); err != nil {
+		t.Fatalf("create legacy repo dir: %v", err)
+	}
+
+	scenarioPath := filepath.Join(tempDir, "scenario.json")
+	helperCommand := []string{os.Args[0], "-test.run=TestBenchHelperProcess", "--", "write-output", "{{output}}"}
+	scenarioJSON := `{
+  "id": "missing-baseline-python",
+  "description": "requires explicit baseline python override",
+  "corpus": {
+    "id": "corpus-1",
+    "path": "` + corpusPath + `",
+    "format": "combined",
+    "profile": "default"
+  },
+  "normalization": {
+    "id": "canonical-summary-v1",
+    "path": "` + normalizationPath + `"
+  },
+  "baseline": {
+    "name": "legacy-python",
+    "command": ["{{baseline_python}}", "adapter.py", "--legacy-repo", "{{legacy_repo}}", "--out", "{{output}}"],
+    "required_paths": ["{{legacy_repo}}"],
+    "repo_path": "{{legacy_repo}}",
+    "controls": {
+      "warmup_iterations": 0,
+      "measured_iterations": 1,
+      "cache_posture": "cold",
+      "concurrency": 1,
+      "max_procs": 1
+    }
+  },
+  "rewrite": {
+    "name": "rewrite",
+    "command": [` + quoteJSONList(helperCommand) + `],
+    "env": {
+      "GO_WANT_HELPER_PROCESS": "1",
+      "BENCH_HELPER_VARIANT": "matching"
+    },
+    "controls": {
+      "warmup_iterations": 0,
+      "measured_iterations": 1,
+      "cache_posture": "cold",
+      "concurrency": 1,
+      "max_procs": 1
+    }
+  }
+}`
+	if err := os.WriteFile(scenarioPath, []byte(scenarioJSON), 0o644); err != nil {
+		t.Fatalf("write scenario: %v", err)
+	}
+
+	_, err := Run(context.Background(), RunOptions{
+		RepoRoot:     tempDir,
+		ScenarioPath: scenarioPath,
+		ResultsDir:   filepath.Join(tempDir, "results"),
+	})
+	if err == nil {
+		t.Fatal("expected missing baseline python prerequisite error")
+	}
+	if !strings.Contains(err.Error(), "--baseline-python or BENCH_BASELINE_PYTHON") {
+		t.Fatalf("expected actionable baseline python guidance, got %v", err)
+	}
+}
+
+func TestBenchRunRequiresExplicitLegacyRepoOverride(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("BENCH_BASELINE_PYTHON", "")
+	t.Setenv("BENCH_LEGACY_REPO", "")
+
+	corpusPath := filepath.Join(tempDir, "access.log")
+	if err := os.WriteFile(corpusPath, []byte("synthetic corpus\n"), 0o644); err != nil {
+		t.Fatalf("write corpus: %v", err)
+	}
+
+	normalizationPath := filepath.Join(tempDir, "normalization.json")
+	if err := os.WriteFile(normalizationPath, []byte(`{
+  "id": "canonical-summary-v1",
+  "summary_fields": ["requests_total"],
+  "workload_fields": ["input_bytes"]
+}`), 0o644); err != nil {
+		t.Fatalf("write normalization: %v", err)
+	}
+
+	scenarioPath := filepath.Join(tempDir, "scenario.json")
+	helperCommand := []string{os.Args[0], "-test.run=TestBenchHelperProcess", "--", "write-output", "{{output}}"}
+	scenarioJSON := `{
+  "id": "missing-legacy-repo",
+  "description": "requires explicit legacy repo override",
+  "corpus": {
+    "id": "corpus-1",
+    "path": "` + corpusPath + `",
+    "format": "combined",
+    "profile": "default"
+  },
+  "normalization": {
+    "id": "canonical-summary-v1",
+    "path": "` + normalizationPath + `"
+  },
+  "baseline": {
+    "name": "legacy-python",
+    "command": ["{{baseline_python}}", "adapter.py", "--legacy-repo", "{{legacy_repo}}", "--out", "{{output}}"],
+    "required_paths": ["{{legacy_repo}}"],
+    "repo_path": "{{legacy_repo}}",
+    "controls": {
+      "warmup_iterations": 0,
+      "measured_iterations": 1,
+      "cache_posture": "cold",
+      "concurrency": 1,
+      "max_procs": 1
+    }
+  },
+  "rewrite": {
+    "name": "rewrite",
+    "command": [` + quoteJSONList(helperCommand) + `],
+    "env": {
+      "GO_WANT_HELPER_PROCESS": "1",
+      "BENCH_HELPER_VARIANT": "matching"
+    },
+    "controls": {
+      "warmup_iterations": 0,
+      "measured_iterations": 1,
+      "cache_posture": "cold",
+      "concurrency": 1,
+      "max_procs": 1
+    }
+  }
+}`
+	if err := os.WriteFile(scenarioPath, []byte(scenarioJSON), 0o644); err != nil {
+		t.Fatalf("write scenario: %v", err)
+	}
+
+	_, err := Run(context.Background(), RunOptions{
+		RepoRoot:       tempDir,
+		ScenarioPath:   scenarioPath,
+		ResultsDir:     filepath.Join(tempDir, "results"),
+		BaselinePython: os.Args[0],
+	})
+	if err == nil {
+		t.Fatal("expected missing legacy repo prerequisite error")
+	}
+	if !strings.Contains(err.Error(), "--legacy-repo or BENCH_LEGACY_REPO") {
+		t.Fatalf("expected actionable legacy repo guidance, got %v", err)
+	}
+}
+
 func helperOutput(variant string) ImplementationOutput {
 	switch variant {
 	case "matching":

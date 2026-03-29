@@ -17,9 +17,9 @@ import (
 	"sync"
 	"time"
 
-	"parsergo/internal/analysis"
-	"parsergo/internal/job"
-	"parsergo/internal/summary"
+	"github.com/sagaragas/parser-go/internal/analysis"
+	"github.com/sagaragas/parser-go/internal/job"
+	"github.com/sagaragas/parser-go/internal/summary"
 )
 
 // ErrorCode represents a stable machine-readable error code.

@@ -326,8 +326,8 @@ func scanForbiddenMarkers(contents string) []ForbiddenMatch {
 		name string
 		re   *regexp.Regexp
 	}{
-		{name: "absolute_repo_path", re: regexp.MustCompile(`/root/[^\s"']+`)},
-		{name: "temporary_path", re: regexp.MustCompile(`/tmp/[^\s"']*`)},
+		{name: "absolute_repo_path", re: regexp.MustCompile(absolutePathPattern("root"))},
+		{name: "temporary_path", re: regexp.MustCompile(absolutePathPattern("tmp"))},
 		{name: "private_filesystem_path", re: regexp.MustCompile(`/(?:home|mnt|media|srv|var|opt|etc)/[^\s"'<>]+`)},
 		{name: "private_ipv4", re: regexp.MustCompile(`\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})\b`)},
 		{name: "query_string_secret", re: regexp.MustCompile(`(?i)[?&](?:access(?:_|-)?token|api(?:_|-)?key|auth(?:orization)?|jwt|password|passwd|secret|session(?:_|-)?id|sig(?:nature)?|token)=[^&\s"'<>]+`)},
@@ -349,6 +349,11 @@ func scanForbiddenMarkers(contents string) []ForbiddenMatch {
 		}
 	}
 	return matches
+}
+
+func absolutePathPattern(root string) string {
+	prefix := regexp.QuoteMeta(string(filepath.Separator) + root + string(filepath.Separator))
+	return prefix + `[^\s"']+`
 }
 
 func updateEvidenceIndex(indexPath string, entry EvidenceScenarioEntry, updatedAt time.Time) error {

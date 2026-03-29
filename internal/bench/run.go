@@ -188,18 +188,36 @@ func prepareScenario(repoRoot string, opts RunOptions) (*preparedScenario, error
 	}
 
 	placeholderContext := map[string]string{
-		"repo_root":       repoRoot,
-		"go_binary":       filepath.Join(repoRoot, ".factory", "bin", "go"),
-		"baseline_python": baselinePython(opts),
-		"legacy_repo":     legacyRepoRoot(repoRoot),
-		"corpus":          corpusPath,
-		"format":          scenario.Corpus.Format,
-		"profile":         scenario.Corpus.Profile,
-		"normalization":   normalizationPath,
-		"scenario_id":     scenario.ID,
-		"scenario_file":   scenarioPath,
-		"scenario_dir":    filepath.Dir(scenarioPath),
-		"benchmark_root":  filepath.Join(repoRoot, "benchmark"),
+		"repo_root":      repoRoot,
+		"corpus":         corpusPath,
+		"format":         scenario.Corpus.Format,
+		"profile":        scenario.Corpus.Profile,
+		"normalization":  normalizationPath,
+		"scenario_id":    scenario.ID,
+		"scenario_file":  scenarioPath,
+		"scenario_dir":   filepath.Dir(scenarioPath),
+		"benchmark_root": filepath.Join(repoRoot, "benchmark"),
+	}
+	if scenarioUsesPlaceholder(scenario, "go_binary") {
+		goBinaryPath, err := goBinary(repoRoot, opts)
+		if err != nil {
+			return nil, err
+		}
+		placeholderContext["go_binary"] = goBinaryPath
+	}
+	if scenarioUsesPlaceholder(scenario, "baseline_python") {
+		baselinePythonPath := baselinePython(opts)
+		if baselinePythonPath == "" {
+			return nil, fmt.Errorf("missing prerequisite: set --baseline-python or BENCH_BASELINE_PYTHON to a compatible Python interpreter for the legacy baseline")
+		}
+		placeholderContext["baseline_python"] = baselinePythonPath
+	}
+	if scenarioUsesPlaceholder(scenario, "legacy_repo") {
+		legacyRepoPath := legacyRepoRoot(opts)
+		if legacyRepoPath == "" {
+			return nil, fmt.Errorf("missing prerequisite: set --legacy-repo or BENCH_LEGACY_REPO to a checkout of the legacy Python repository")
+		}
+		placeholderContext["legacy_repo"] = legacyRepoPath
 	}
 
 	baseline, err := prepareImplementation("baseline", scenario.Baseline, placeholderContext)
@@ -627,17 +645,67 @@ func resolveRepoRoot(repoRoot string) (string, error) {
 }
 
 func baselinePython(opts RunOptions) string {
-	if opts.BaselinePython != "" {
-		return opts.BaselinePython
-	}
-	return os.Getenv("BENCH_BASELINE_PYTHON")
-}
-
-func legacyRepoRoot(repoRoot string) string {
-	if override := strings.TrimSpace(os.Getenv("BENCH_LEGACY_REPO")); override != "" {
+	if override := strings.TrimSpace(opts.BaselinePython); override != "" {
 		return override
 	}
-	return filepath.Join(filepath.Dir(repoRoot), "web-log-parser")
+	return strings.TrimSpace(os.Getenv("BENCH_BASELINE_PYTHON"))
+}
+
+func goBinary(repoRoot string, opts RunOptions) (string, error) {
+	if override := strings.TrimSpace(opts.GoBinary); override != "" {
+		return override, nil
+	}
+	if override := strings.TrimSpace(os.Getenv("BENCH_GO_BINARY")); override != "" {
+		return override, nil
+	}
+	localGo := filepath.Join(repoRoot, ".factory", "bin", "go")
+	if _, err := os.Stat(localGo); err == nil {
+		return localGo, nil
+	}
+	if resolved, err := exec.LookPath("go"); err == nil {
+		return resolved, nil
+	}
+	return "", fmt.Errorf("missing prerequisite: install Go so \"go\" is on PATH, or set --go-binary or BENCH_GO_BINARY")
+}
+
+func legacyRepoRoot(opts RunOptions) string {
+	if override := strings.TrimSpace(opts.LegacyRepo); override != "" {
+		return override
+	}
+	return strings.TrimSpace(os.Getenv("BENCH_LEGACY_REPO"))
+}
+
+func scenarioUsesPlaceholder(scenario Scenario, key string) bool {
+	return implementationUsesPlaceholder(scenario.Baseline, key) || implementationUsesPlaceholder(scenario.Rewrite, key)
+}
+
+func implementationUsesPlaceholder(spec ImplementationSpec, key string) bool {
+	if containsPlaceholder(spec.Command, key) || containsPlaceholder(spec.VersionCommand, key) || strings.Contains(spec.WorkingDir, placeholderToken(key)) || strings.Contains(spec.RepoPath, placeholderToken(key)) {
+		return true
+	}
+	if containsPlaceholder(spec.RequiredPaths, key) {
+		return true
+	}
+	for envKey, envValue := range spec.Env {
+		if strings.Contains(envKey, placeholderToken(key)) || strings.Contains(envValue, placeholderToken(key)) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsPlaceholder(values []string, key string) bool {
+	token := placeholderToken(key)
+	for _, value := range values {
+		if strings.Contains(value, token) {
+			return true
+		}
+	}
+	return false
+}
+
+func placeholderToken(key string) string {
+	return "{{" + key + "}}"
 }
 
 func ensureCommandAvailable(command string) error {

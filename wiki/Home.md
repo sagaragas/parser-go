@@ -1,6 +1,6 @@
-# parsergo wiki
+# parser-go wiki
 
-parsergo is a clean-room Go rewrite of a legacy Python web log parser. The current public evidence set lives in `evidence/benchmark-homelab-20260328/` and is pinned to rewrite revision `dc01cf104ef86c2d3a755b84bcae1203e1a4b15d`, as recorded in `evidence/benchmark-homelab-20260328/index.json`.
+parsergo is a clean-room Go rewrite of a legacy Python web log parser. The public module path is `github.com/sagaragas/parser-go`. The current public evidence set lives in `evidence/benchmark-homelab-20260328/` and is pinned to rewrite revision `dc01cf104ef86c2d3a755b84bcae1203e1a4b15d`, as recorded in `evidence/benchmark-homelab-20260328/index.json`.
 
 ## Start here
 

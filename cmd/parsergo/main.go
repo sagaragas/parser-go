@@ -14,8 +14,8 @@ import (
 	"syscall"
 	"time"
 
-	"parsergo/internal/api"
-	"parsergo/internal/job"
+	"github.com/sagaragas/parser-go/internal/api"
+	"github.com/sagaragas/parser-go/internal/job"
 )
 
 const (

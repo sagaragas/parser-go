@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"parsergo/internal/job"
-	"parsergo/internal/summary"
+	"github.com/sagaragas/parser-go/internal/job"
+	"github.com/sagaragas/parser-go/internal/summary"
 )
 
 func setupReportHandler() (*ReportHandler, *Handler, *job.Store) {

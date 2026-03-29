@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"parsergo/internal/api"
-	internalSummary "parsergo/internal/summary"
+	"github.com/sagaragas/parser-go/internal/api"
+	internalSummary "github.com/sagaragas/parser-go/internal/summary"
 )
 
 var (

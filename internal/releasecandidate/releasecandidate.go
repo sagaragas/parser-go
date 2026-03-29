@@ -43,6 +43,66 @@ const (
 	releaseArchiveName      = "parser-go-release-candidate.tar.gz"
 	releaseTreeRoot         = "tree/parser-go"
 	releaseManifestRepoRoot = "<repo-root>"
+	publicGitignore         = `# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+/parsergo
+
+# Test output
+*.out
+tmp/
+temp/
+*.tmp
+
+# Build directories
+/dist
+/build
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local workspace (contains job data)
+/work
+/workspace
+
+# Benchmark outputs (may contain sensitive data)
+/benchmark-output
+*.log
+!/benchmark/corpora/**/*.log
+
+# Benchmark results directory (runtime artifacts only)
+/benchmark/results/*
+!/benchmark/results/.gitignore
+
+# Evidence temp files
+/evidence/*.tmp
+/evidence/*.temp
+/evidence/*.log
+
+# Coverage
+*.cover
+coverage.out
+
+# Go vendor (if used)
+/vendor
+
+# Local toolchains and compatibility environments
+.factory/
+.tools/
+.venv/
+venv/
+`
 )
 
 type Manifest struct {
@@ -93,9 +153,14 @@ func Generate(repoRoot, outputDir string) (*Manifest, error) {
 			return nil, err
 		}
 	}
+	if includesFile(included, ".gitignore") {
+		if err := os.WriteFile(filepath.Join(treeRoot, ".gitignore"), []byte(publicGitignore), 0o644); err != nil {
+			return nil, fmt.Errorf("write public .gitignore: %w", err)
+		}
+	}
 
 	archivePath := filepath.Join(outputDir, releaseArchiveName)
-	if err := writeArchive(repoRoot, archivePath, included); err != nil {
+	if err := writeArchive(treeRoot, archivePath, included); err != nil {
 		return nil, err
 	}
 
@@ -229,7 +294,16 @@ func copyFile(sourcePath, destPath string) error {
 	return nil
 }
 
-func writeArchive(repoRoot, archivePath string, included []string) error {
+func includesFile(paths []string, target string) bool {
+	for _, path := range paths {
+		if path == target {
+			return true
+		}
+	}
+	return false
+}
+
+func writeArchive(sourceRoot, archivePath string, included []string) error {
 	file, err := os.OpenFile(archivePath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("create archive: %w", err)
@@ -243,7 +317,7 @@ func writeArchive(repoRoot, archivePath string, included []string) error {
 	defer tarWriter.Close()
 
 	for _, rel := range included {
-		sourcePath := filepath.Join(repoRoot, rel)
+		sourcePath := filepath.Join(sourceRoot, filepath.FromSlash(rel))
 		info, err := os.Stat(sourcePath)
 		if err != nil {
 			return fmt.Errorf("stat archive source %s: %w", sourcePath, err)

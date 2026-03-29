@@ -37,6 +37,17 @@ If any tracked field drifts, the run is not claimable. The published index curre
 
 Each publishable bundle includes the manifest, fairness proof, normalized summaries, workload accounting, raw timing metrics, aggregate summary, and sanitized environment snapshot. The homelab bundle also carries `redaction/report.json`, `redaction/scan.json`, and the same-run service cross-check at `service-integration/cross-check.json`.
 
+## Rerunning the committed scenarios
+
+A fresh clone of `github.com/sagaragas/parser-go` does not assume mission-local paths or sibling checkouts. To run the committed baseline-vs-rewrite scenarios yourself:
+
+1. Install Go 1.26 or newer, or point `BENCH_GO_BINARY` / `--go-binary` at the Go binary you want the harness to use.
+2. Create a compatibility environment for the legacy Python baseline and point `BENCH_BASELINE_PYTHON` / `--baseline-python` at that interpreter.
+3. Clone the legacy Python repo separately and point `BENCH_LEGACY_REPO` / `--legacy-repo` at that checkout.
+4. Run `go run ./cmd/bench run --scenario synthetic-small` or switch the scenario id to another committed file under `benchmark/scenarios/`.
+
+The harness writes runtime output under `benchmark/results/`. That directory stays gitignored in both the internal mission checkout and the staged public repo.
+
 ## Limits of the current result set
 
 - The committed homelab-backed scenario is `homelab-jellyfin-illustrative`. It is useful because it proves the end-to-end path on real sanitized traffic, but it is still labeled illustrative rather than representative.

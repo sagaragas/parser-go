@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 
-	"parsergo/internal/analysis"
-	internalSummary "parsergo/internal/summary"
+	"github.com/sagaragas/parser-go/internal/analysis"
+	internalSummary "github.com/sagaragas/parser-go/internal/summary"
 )
 
 // AnalyzeCorpus runs the rewrite analysis engine over a corpus and returns benchmark output.

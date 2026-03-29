@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"parsergo/internal/analysis"
+	"github.com/sagaragas/parser-go/internal/analysis"
 )
 
 func TestCompute_Basic(t *testing.T) {

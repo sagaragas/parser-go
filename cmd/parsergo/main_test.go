@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"parsergo/internal/api"
+	"github.com/sagaragas/parser-go/internal/api"
 )
 
 func TestMainStub(t *testing.T) {

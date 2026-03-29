@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"parsergo/internal/releasecandidate"
+	"github.com/sagaragas/parser-go/internal/releasecandidate"
 )
 
 func main() {

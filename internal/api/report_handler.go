@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"parsergo/internal/job"
-	"parsergo/internal/summary"
+	"github.com/sagaragas/parser-go/internal/job"
+	"github.com/sagaragas/parser-go/internal/summary"
 )
 
 // ReportHandler handles browser-facing report routes.

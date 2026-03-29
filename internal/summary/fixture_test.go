@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"parsergo/internal/analysis"
+	"github.com/sagaragas/parser-go/internal/analysis"
 )
 
 // FixtureTest represents a test case with fixture input and expected behavior

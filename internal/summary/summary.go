@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"parsergo/internal/analysis"
+	"github.com/sagaragas/parser-go/internal/analysis"
 )
 
 // Summary represents the canonical JSON summary output.

@@ -270,6 +270,8 @@ type RunOptions struct {
 	ScenarioPath   string
 	ResultsDir     string
 	BaselinePython string
+	GoBinary       string
+	LegacyRepo     string
 	EvidenceSetDir string
 	ServiceBaseURL string
 }

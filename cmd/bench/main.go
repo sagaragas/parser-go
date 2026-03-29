@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"parsergo/internal/bench"
+	"github.com/sagaragas/parser-go/internal/bench"
 )
 
 func main() {
@@ -41,7 +41,9 @@ func runCommand(args []string) error {
 	scenarioPath := fs.String("scenario-file", "", "scenario file path")
 	resultsDir := fs.String("results-dir", "", "results directory")
 	repoRoot := fs.String("repo-root", "", "repo root")
+	goBinary := fs.String("go-binary", "", "Go binary path override")
 	baselinePython := fs.String("baseline-python", "", "baseline python interpreter path")
+	legacyRepo := fs.String("legacy-repo", "", "legacy baseline checkout path")
 	evidenceSetDir := fs.String("evidence-set-dir", "", "publishable evidence-set directory")
 	serviceBaseURL := fs.String("service-base-url", "", "service base URL for same-run cross-check")
 	if err := fs.Parse(args); err != nil {
@@ -70,6 +72,8 @@ func runCommand(args []string) error {
 		ScenarioPath:   path,
 		ResultsDir:     *resultsDir,
 		BaselinePython: *baselinePython,
+		GoBinary:       *goBinary,
+		LegacyRepo:     *legacyRepo,
 		EvidenceSetDir: *evidenceSetDir,
 		ServiceBaseURL: *serviceBaseURL,
 	})
@@ -130,7 +134,10 @@ func rewriteCommand(args []string) error {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, "Usage:")
-	fmt.Fprintln(os.Stderr, "  bench run --scenario <id> [--results-dir <dir>] [--baseline-python <path>] [--evidence-set-dir <dir>] [--service-base-url <url>]")
-	fmt.Fprintln(os.Stderr, "  bench run --scenario-file <path> [--results-dir <dir>] [--baseline-python <path>] [--evidence-set-dir <dir>] [--service-base-url <url>]")
+	fmt.Fprintln(os.Stderr, "  bench run --scenario <id> [--results-dir <dir>] [--go-binary <path>] [--baseline-python <path>] [--legacy-repo <path>] [--evidence-set-dir <dir>] [--service-base-url <url>]")
+	fmt.Fprintln(os.Stderr, "  bench run --scenario-file <path> [--results-dir <dir>] [--go-binary <path>] [--baseline-python <path>] [--legacy-repo <path>] [--evidence-set-dir <dir>] [--service-base-url <url>]")
 	fmt.Fprintln(os.Stderr, "  bench impl rewrite --corpus <path> --out <path> [--format combined] [--profile default]")
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "Environment fallbacks:")
+	fmt.Fprintln(os.Stderr, "  BENCH_GO_BINARY, BENCH_BASELINE_PYTHON, BENCH_LEGACY_REPO")
 }

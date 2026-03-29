@@ -1,6 +1,8 @@
-# parsergo
+# parser-go
 
 parsergo is a clean-room Go rewrite of a legacy Python web log parser. The shipped surface is a long-running HTTP service plus a benchmark harness and a publishable evidence set.
+
+Public module path: `github.com/sagaragas/parser-go`
 
 ## Start here
 
@@ -10,6 +12,31 @@ parsergo is a clean-room Go rewrite of a legacy Python web log parser. The shipp
 - [Benchmark methodology](./wiki/Benchmark-Methodology.md)
 - [Evidence index](./wiki/Evidence-Index.md)
 - [Apache-2.0 license](./LICENSE)
+
+## Quick start
+
+```sh
+go test ./...
+go build ./...
+```
+
+## Benchmark prerequisites and overrides
+
+The benchmark harness compares this repo with the legacy Python baseline. A fresh public clone needs three explicit inputs before the baseline side can run:
+
+- Go 1.26 or newer on your `PATH`, or `BENCH_GO_BINARY` / `--go-binary`
+- a compatible Python interpreter for the legacy baseline via `BENCH_BASELINE_PYTHON` / `--baseline-python`
+- a separate checkout of the legacy repository via `BENCH_LEGACY_REPO` / `--legacy-repo`
+
+Example:
+
+```sh
+BENCH_BASELINE_PYTHON=/path/to/legacy-venv/bin/python \
+BENCH_LEGACY_REPO=/path/to/web-log-parser \
+go run ./cmd/bench run --scenario synthetic-small
+```
+
+If `go` is not on your `PATH`, add `BENCH_GO_BINARY=/path/to/go` or pass `--go-binary /path/to/go`.
 
 ## Current measured bundle
 
@@ -25,4 +52,4 @@ This repo now includes a generator for a public-safe release-candidate tree and 
 go run ./cmd/releasecandidate
 ```
 
-By default it writes `dist/release-candidate/tree/parser-go/`, `dist/release-candidate/parser-go-release-candidate.tar.gz`, and `dist/release-candidate/manifest.json`. The generated output excludes `.factory/`, `HOMELAB_LOG_SOURCES.md`, `benchmark/results/`, local toolchains, and other mission-only or temp paths.
+From the internal mission checkout, the standalone public launch root is `dist/release-candidate/tree/parser-go/`. The generated tree and archive exclude `.factory/`, `HOMELAB_LOG_SOURCES.md`, `benchmark/results/`, local toolchains, and other mission-only or temporary paths.

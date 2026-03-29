@@ -105,12 +105,40 @@ func TestGenerateProducesPublishablePaths(t *testing.T) {
 		t.Fatalf("repo_root = %q, want %q", manifest.RepoRoot, releaseManifestRepoRoot)
 	}
 	for _, value := range []string{manifest.ArchivePath, manifest.TreeRoot, manifest.RepoRoot} {
-		if strings.Contains(value, "/root/") {
+		if strings.Contains(value, machineLocalRootPrefix()) {
 			t.Fatalf("release manifest leaked machine-local path in %q", value)
 		}
 	}
 
-	scenarioDir := filepath.Join(outputDir, filepath.FromSlash(releaseTreeRoot), "benchmark", "scenarios")
+	treeRoot := filepath.Join(outputDir, filepath.FromSlash(releaseTreeRoot))
+	gitignore, err := os.ReadFile(filepath.Join(treeRoot, ".gitignore"))
+	if err != nil {
+		t.Fatalf("read generated public .gitignore: %v", err)
+	}
+	if !strings.Contains(string(gitignore), ".factory/") {
+		t.Fatal("expected generated public .gitignore to ignore .factory/")
+	}
+	if strings.Contains(string(gitignore), "!.factory/") {
+		t.Fatal("expected generated public .gitignore to stop re-including .factory/")
+	}
+
+	goMod, err := os.ReadFile(filepath.Join(treeRoot, "go.mod"))
+	if err != nil {
+		t.Fatalf("read generated go.mod: %v", err)
+	}
+	if !strings.Contains(string(goMod), "module github.com/sagaragas/parser-go") {
+		t.Fatalf("expected generated go.mod to use the public module path, got %q", strings.TrimSpace(string(goMod)))
+	}
+
+	evidenceIndex, err := os.ReadFile(filepath.Join(treeRoot, "wiki", "Evidence-Index.md"))
+	if err != nil {
+		t.Fatalf("read generated evidence index: %v", err)
+	}
+	if strings.Contains(string(evidenceIndex), siblingCheckoutPrefix("ragas-dev")) {
+		t.Fatal("expected generated evidence index to avoid sibling checkout paths")
+	}
+
+	scenarioDir := filepath.Join(treeRoot, "benchmark", "scenarios")
 	entries, err := os.ReadDir(scenarioDir)
 	if err != nil {
 		t.Fatalf("read generated release scenarios: %v", err)
@@ -194,6 +222,14 @@ func TestGenerateIncludesTrackedFilesOnly(t *testing.T) {
 
 func machineLocalLegacyRepoPath() string {
 	return filepath.Join(string(filepath.Separator), "root", "web-log-parser")
+}
+
+func machineLocalRootPrefix() string {
+	return string(filepath.Separator) + "root" + string(filepath.Separator)
+}
+
+func siblingCheckoutPrefix(name string) string {
+	return name + "/"
 }
 
 func machineLocalRepoPath() string {

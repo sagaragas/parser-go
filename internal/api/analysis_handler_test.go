@@ -10,14 +10,15 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"parsergo/internal/analysis"
-	"parsergo/internal/job"
-	"parsergo/internal/summary"
+	"github.com/sagaragas/parser-go/internal/analysis"
+	"github.com/sagaragas/parser-go/internal/job"
+	"github.com/sagaragas/parser-go/internal/summary"
 )
 
 func setupTestHandlerWithConfig(cfg HandlerConfig) (*Handler, *job.Store) {
@@ -97,7 +98,7 @@ func TestHealthzEndpoint(t *testing.T) {
 	}
 
 	// Verify no stack traces or absolute paths (VAL-SVC-001)
-	if strings.Contains(body, "/root/") || strings.Contains(body, "/home/") {
+	if strings.Contains(body, absolutePathPrefix("root")) || strings.Contains(body, absolutePathPrefix("home")) {
 		t.Error("body contains absolute path")
 	}
 	if strings.Contains(body, "stack") || strings.Contains(body, "trace") {
@@ -789,7 +790,7 @@ func TestAllMalformedDatasetFailsTerminally(t *testing.T) {
 	if !strings.Contains(status.Error.Message, "no valid log lines") {
 		t.Fatalf("expected sanitized malformed dataset message, got %q", status.Error.Message)
 	}
-	if strings.Contains(status.Error.Message, "/root/") || strings.Contains(status.Error.Message, "/tmp/") {
+	if strings.Contains(status.Error.Message, absolutePathPrefix("root")) || strings.Contains(status.Error.Message, absolutePathPrefix("tmp")) {
 		t.Fatalf("expected sanitized error message, got %q", status.Error.Message)
 	}
 
@@ -807,7 +808,6 @@ func TestAllMalformedDatasetFailsTerminally(t *testing.T) {
 	if ws != nil && ws.Summary != nil {
 		t.Fatal("expected no summary to be stored for all-malformed dataset")
 	}
-
 	summaryReq := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/v1/analyses/%s/summary", resp.ID), nil)
 	summaryResp := httptest.NewRecorder()
 	handler.handleAnalysisDetail(summaryResp, summaryReq)
@@ -1349,6 +1349,10 @@ func TestAnalysisAPI(t *testing.T) {
 	t.Run("SummaryRetrieval", TestSummaryRetrieval)
 	t.Run("ReportRetrieval", TestReportRetrieval)
 	t.Run("ReadinessBlocksSubmission", TestReadinessBlocksSubmission)
+}
+
+func absolutePathPrefix(root string) string {
+	return string(filepath.Separator) + root + string(filepath.Separator)
 }
 
 // Helper to write temp file for tests
