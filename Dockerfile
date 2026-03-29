@@ -8,5 +8,6 @@ RUN CGO_ENABLED=0 go build -o /parsergo ./cmd/parsergo
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates
 COPY --from=build /parsergo /usr/local/bin/parsergo
+ENV PARSERGO_ADDR=0.0.0.0:3120
 EXPOSE 3120
 ENTRYPOINT ["parsergo", "serve"]

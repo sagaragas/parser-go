@@ -34,7 +34,7 @@ parsergo serve
 curl -X POST http://127.0.0.1:3120/v1/analyses \
   -F "format=combined" \
   -F "profile=default" \
-  -F "dataset=@/path/to/access.log"
+  -F "file=@/path/to/access.log"
 ```
 
 The response includes a job ID and polling URL. Once the job completes, view results at:
@@ -48,6 +48,8 @@ The response includes a job ID and polling URL. Once the job completes, view res
 docker build -t parsergo .
 docker run -p 3120:3120 parsergo
 ```
+
+The container defaults to binding `0.0.0.0:3120` so it is reachable from the host via the port mapping. To override, set `PARSERGO_ADDR`.
 
 ## Configuration
 
@@ -69,7 +71,7 @@ All configuration is through environment variables:
 | `/v1/analyses` | POST | Submit a log file for analysis (202) |
 | `/v1/analyses/{id}` | GET | Poll job status |
 | `/v1/analyses/{id}/summary` | GET | JSON analysis results |
-| `/v1/analyses/{id}/report` | GET | HTML report redirect |
+| `/v1/analyses/{id}/report` | GET | HTML report |
 | `/reports` | GET | List completed reports |
 | `/reports/{id}` | GET | View report in browser |
 
@@ -107,15 +109,21 @@ go vet ./...
 
 ## Benchmarks
 
-The benchmark harness compares this Go implementation against a Python baseline on the same input:
+Go-native benchmarks run on the [NASA Kennedy Space Center access logs](https://ita.ee.lbl.gov/html/contrib/NASA-HTTP.html) (1.89M lines, 196 MB). A 10K-line sample is included in the repo:
+
+```sh
+go test -bench=. -benchmem ./internal/analysis/
+```
+
+On the full NASA dataset (~52 MB/s, ~480K lines/sec). See [`benchmark/README.md`](./benchmark/README.md) for details.
+
+A cross-language parity harness is also available for comparing against the Python baseline:
 
 ```sh
 BENCH_BASELINE_PYTHON=/path/to/python \
 BENCH_LEGACY_REPO=/path/to/web-log-parser \
 go run ./cmd/bench run --scenario synthetic-small
 ```
-
-See [`benchmark/README.md`](./benchmark/README.md) for details.
 
 ## License
 

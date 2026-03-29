@@ -1,21 +1,19 @@
 # Synthetic corpora
 
-Placeholder for synthetic test fixtures.
+Synthetic test fixtures used by the benchmark harness.
 
 ## Structure
 
-- `small/` - Sanity check corpus (thousands of lines)
-- `medium/` - Representative single-file workload (hundreds of thousands of lines)
-- `large/` - Stress test corpus (millions of lines)
+- `small/` - Sanity check corpus (5 lines: 3 matched, 1 filtered, 1 malformed)
 
-## Generation
+## Properties
 
-Synthetic fixtures will be generated with controlled properties:
-- Deterministic seed for reproducibility
+Fixtures are built with controlled properties:
+- Deterministic content for reproducibility
 - Known line counts and byte sizes
-- Controlled format variation
+- Controlled format variation (valid, filtered, malformed)
 - Deterministic ranking tie scenarios
 
 ## Status
 
-Awaiting fixture generation implementation.
+The `synthetic-small` scenario is operational and used by the benchmark harness. See `benchmark/scenarios/synthetic-small.json` for the scenario definition.
