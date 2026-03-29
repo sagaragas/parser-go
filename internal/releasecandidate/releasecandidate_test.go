@@ -158,17 +158,62 @@ func TestGenerateProducesPublishablePaths(t *testing.T) {
 	}
 }
 
+func TestPublicRepoSourceHasCommunityBaseline(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := committedReleaseCandidateRepoRoot(t)
+	requiredFiles := []string{
+		"CODE_OF_CONDUCT.md",
+		"CONTRIBUTING.md",
+		"SECURITY.md",
+		".github/ISSUE_TEMPLATE/bug_report.md",
+		".github/pull_request_template.md",
+	}
+	for _, rel := range requiredFiles {
+		if _, err := os.Stat(filepath.Join(repoRoot, filepath.FromSlash(rel))); err != nil {
+			t.Fatalf("expected community baseline file %q in repo source: %v", rel, err)
+		}
+	}
+
+	readFile := func(rel string) string {
+		t.Helper()
+
+		data, err := os.ReadFile(filepath.Join(repoRoot, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatalf("read repo source file %q: %v", rel, err)
+		}
+		return string(data)
+	}
+
+	if got := readFile("README.md"); !strings.Contains(got, "mission-mode clean-room rewrite") {
+		t.Fatal("expected generated README.md to mention mission-mode clean-room provenance")
+	}
+	if got := readFile("wiki/Clean-Room-and-Legal.md"); !strings.Contains(got, "mission mode") {
+		t.Fatal("expected generated clean-room wiki page to mention mission mode")
+	}
+	for _, rel := range []string{"CONTRIBUTING.md", "SECURITY.md"} {
+		if got := readFile(rel); !strings.Contains(got, "github.com/sagaragas/parser-go") {
+			t.Fatalf("expected %s to target the public GitHub repo", rel)
+		}
+	}
+}
+
 func TestGenerateIncludesTrackedFilesOnly(t *testing.T) {
 	t.Parallel()
 
 	repoRoot := tempGitRepo(t, map[string]string{
-		".factory/services.yaml":           "commands: {}\n",
-		"HOMELAB_LOG_SOURCES.md":           "mission-only\n",
-		"LICENSE":                          "Apache-2.0\n",
-		"README.md":                        "# parser-go\n",
-		"benchmark/results/.gitignore":     "*\n",
-		"benchmark/scenarios/example.json": "{\n  \"id\": \"example\"\n}\n",
-		"wiki/Home.md":                     "# Home\n",
+		".github/ISSUE_TEMPLATE/bug_report.md": "name: Bug report\n",
+		".github/pull_request_template.md":     "## Summary\n",
+		".factory/services.yaml":               "commands: {}\n",
+		"CODE_OF_CONDUCT.md":                   "# Code of conduct\n",
+		"CONTRIBUTING.md":                      "# Contributing\n",
+		"HOMELAB_LOG_SOURCES.md":               "mission-only\n",
+		"LICENSE":                              "Apache-2.0\n",
+		"README.md":                            "# parser-go\n",
+		"SECURITY.md":                          "# Security policy\n",
+		"benchmark/results/.gitignore":         "*\n",
+		"benchmark/scenarios/example.json":     "{\n  \"id\": \"example\"\n}\n",
+		"wiki/Home.md":                         "# Home\n",
 	})
 	writeRepoFile(t, repoRoot, "local-notes.txt", "do not publish\n")
 	writeRepoFile(t, repoRoot, "tmp/runtime.txt", "temporary data\n")
@@ -180,8 +225,13 @@ func TestGenerateIncludesTrackedFilesOnly(t *testing.T) {
 	}
 
 	wantIncluded := []string{
+		".github/ISSUE_TEMPLATE/bug_report.md",
+		".github/pull_request_template.md",
+		"CODE_OF_CONDUCT.md",
+		"CONTRIBUTING.md",
 		"LICENSE",
 		"README.md",
+		"SECURITY.md",
 		"benchmark/scenarios/example.json",
 		"wiki/Home.md",
 	}
@@ -210,8 +260,13 @@ func TestGenerateIncludesTrackedFilesOnly(t *testing.T) {
 
 	archiveMembers := archiveMembers(t, filepath.Join(outputDir, releaseArchiveName))
 	wantArchiveMembers := []string{
+		"parser-go/.github/ISSUE_TEMPLATE/bug_report.md",
+		"parser-go/.github/pull_request_template.md",
+		"parser-go/CODE_OF_CONDUCT.md",
+		"parser-go/CONTRIBUTING.md",
 		"parser-go/LICENSE",
 		"parser-go/README.md",
+		"parser-go/SECURITY.md",
 		"parser-go/benchmark/scenarios/example.json",
 		"parser-go/wiki/Home.md",
 	}

@@ -20,6 +20,16 @@ go test ./...
 go build ./...
 ```
 
+## Project provenance
+
+`parser-go` started as a mission-mode clean-room rewrite of a legacy Python log parser that did not ship a clear license grant. The legacy repository was used as read-only research input; this repo, its docs, and its benchmark artifacts were written independently for publication at `github.com/sagaragas/parser-go`.
+
+## Community
+
+- [Contributing guide](./CONTRIBUTING.md)
+- [Security policy](./SECURITY.md)
+- [Code of conduct](./CODE_OF_CONDUCT.md)
+
 ## Benchmark prerequisites and overrides
 
 The benchmark harness compares this repo with the legacy Python baseline. A fresh public clone needs three explicit inputs before the baseline side can run:

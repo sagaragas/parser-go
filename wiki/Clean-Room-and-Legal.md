@@ -2,7 +2,7 @@
 
 ## Plain statement
 
-The legacy Python repository was used as read-only research input. This repo does not copy upstream code, README text, report templates, screenshots, or other assets. The Go implementation, the wiki prose, and the committed benchmark evidence were written independently for this mission.
+The legacy Python repository was used as read-only research input. This repo was built in mission mode under a clean-room OSS process, and it does not copy upstream code, README text, report templates, screenshots, or other assets. The Go implementation, the wiki prose, and the committed benchmark evidence were written independently for publication.
 
 ## Why the boundary matters
 
