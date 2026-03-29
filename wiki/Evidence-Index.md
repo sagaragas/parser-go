@@ -46,6 +46,6 @@ No charts or screenshots are committed here. The companion article quotes the sa
 ## How to trace a claim
 
 1. Start at `evidence/benchmark-homelab-20260328/index.json` for the scenario id, corpus hash, representation, and measured rewrite revision.
-2. Open that scenario's `manifest.json` for the declared corpus, normalization rules, host snapshot, and fairness controls.
+2. Open that scenario's `manifest.json` for the declared corpus, normalization rules, sanitized host snapshot, and fairness controls.
 3. Check `parity/parity.json` and `parity/aggregate-summary.json` before using any timing number.
 4. For the homelab-backed scenario, read the matching `redaction/` files and `service-integration/cross-check.json` so the benchmark, API, and report surfaces stay tied to the same run.

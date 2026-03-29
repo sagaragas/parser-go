@@ -10,7 +10,7 @@ Each evidence bundle is a self-contained directory with:
 - `baseline/` - Baseline (legacy Python) normalized summaries and metrics
 - `rewrite/` - Go rewrite normalized summaries and metrics
 - `parity/` - Parity diff results and workload accounting comparisons
-- `environment/` - Sanitized environment snapshot
+- `environment/` - Sanitized environment snapshot with coarse host classes instead of exact hardware fingerprints
 - `redaction/` - Anonymization reports (for homelab scenarios)
 
 ## Safety

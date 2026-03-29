@@ -35,7 +35,7 @@ If any tracked field drifts, the run is not claimable. The published index curre
 
 ## What gets published
 
-Each publishable bundle includes the manifest, fairness proof, normalized summaries, workload accounting, raw timing metrics, aggregate summary, and sanitized environment snapshot. The homelab bundle also carries `redaction/report.json`, `redaction/scan.json`, and the same-run service cross-check at `service-integration/cross-check.json`.
+Each publishable bundle includes the manifest, fairness proof, normalized summaries, workload accounting, raw timing metrics, aggregate summary, and a sanitized environment snapshot. The public host snapshot keeps the measured OS, architecture, and tool versions, but coarsens the machine fingerprint into `kernel_family`, `cpu_class`, `core_count_bucket`, and `ram_class` instead of shipping the exact CPU model, full kernel string, or exact RAM total. The homelab bundle also carries `redaction/report.json`, `redaction/scan.json`, and the same-run service cross-check at `service-integration/cross-check.json`.
 
 ## Rerunning the committed scenarios
 

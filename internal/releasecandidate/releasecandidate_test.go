@@ -138,6 +138,11 @@ func TestGenerateProducesPublishablePaths(t *testing.T) {
 		t.Fatal("expected generated evidence index to avoid sibling checkout paths")
 	}
 
+	assertSanitizedBenchmarkEvidenceFile(t, filepath.Join(treeRoot, "evidence", "benchmark-homelab-20260328", "synthetic-small", "manifest.json"))
+	assertSanitizedBenchmarkEvidenceFile(t, filepath.Join(treeRoot, "evidence", "benchmark-homelab-20260328", "synthetic-small", "environment", "snapshot.json"))
+	assertSanitizedBenchmarkEvidenceFile(t, filepath.Join(treeRoot, "evidence", "benchmark-homelab-20260328", "homelab-jellyfin-illustrative", "manifest.json"))
+	assertSanitizedBenchmarkEvidenceFile(t, filepath.Join(treeRoot, "evidence", "benchmark-homelab-20260328", "homelab-jellyfin-illustrative", "environment", "snapshot.json"))
+
 	scenarioDir := filepath.Join(treeRoot, "benchmark", "scenarios")
 	entries, err := os.ReadDir(scenarioDir)
 	if err != nil {
@@ -367,4 +372,40 @@ func archiveMembers(t *testing.T, archivePath string) []string {
 		members = append(members, header.Name)
 	}
 	return members
+}
+
+func assertSanitizedBenchmarkEvidenceFile(t *testing.T, path string) {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read sanitized benchmark evidence file %q: %v", path, err)
+	}
+
+	text := string(data)
+	for _, forbidden := range []string{
+		`"kernel":`,
+		`"cpu_model":`,
+		`"logical_cores":`,
+		`"total_ram_bytes":`,
+		`12th Gen Intel(R) Core(TM) i5-12500T`,
+		`6.17.13-1-pve`,
+		`41943040000`,
+	} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("benchmark evidence file %q still leaks %q", path, forbidden)
+		}
+	}
+
+	for _, required := range []string{
+		`"kernel_family":`,
+		`"cpu_class":`,
+		`"core_count_bucket":`,
+		`"ram_class":`,
+		`"publication_sanitized": true`,
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("benchmark evidence file %q is missing sanitized field %q", path, required)
+		}
+	}
 }
