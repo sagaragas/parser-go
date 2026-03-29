@@ -39,6 +39,12 @@ var excludedPaths = map[string]struct{}{
 	"workspace":              {},
 }
 
+const (
+	releaseArchiveName        = "parser-go-release-candidate.tar.gz"
+	releaseTreeRoot           = "tree/parser-go"
+	releaseManifestRepoRoot   = "<repo-root>"
+)
+
 type Manifest struct {
 	ArchivePath   string   `json:"archive_path"`
 	ExcludedRules []string `json:"excluded_rules"`
@@ -75,7 +81,7 @@ func Generate(repoRoot, outputDir string) (*Manifest, error) {
 		return nil, fmt.Errorf("reset output dir: %w", err)
 	}
 
-	treeRoot := filepath.Join(outputDir, "tree", "parser-go")
+	treeRoot := filepath.Join(outputDir, filepath.FromSlash(releaseTreeRoot))
 	if err := os.MkdirAll(treeRoot, 0o755); err != nil {
 		return nil, fmt.Errorf("create tree root: %w", err)
 	}
@@ -88,7 +94,7 @@ func Generate(repoRoot, outputDir string) (*Manifest, error) {
 		}
 	}
 
-	archivePath := filepath.Join(outputDir, "parser-go-release-candidate.tar.gz")
+	archivePath := filepath.Join(outputDir, releaseArchiveName)
 	if err := writeArchive(repoRoot, archivePath, included); err != nil {
 		return nil, err
 	}
@@ -99,14 +105,14 @@ func Generate(repoRoot, outputDir string) (*Manifest, error) {
 	}
 
 	manifest := &Manifest{
-		ArchivePath:   filepath.ToSlash(archivePath),
+		ArchivePath:   releaseArchiveName,
 		ExcludedRules: append([]string(nil), exclusionRules()...),
 		FileCount:     len(included),
 		GeneratedAt:   time.Now().UTC().Format(time.RFC3339Nano),
 		GitRevision:   revision,
 		IncludedFiles: included,
-		RepoRoot:      filepath.ToSlash(repoRoot),
-		TreeRoot:      filepath.ToSlash(treeRoot),
+		RepoRoot:      releaseManifestRepoRoot,
+		TreeRoot:      releaseTreeRoot,
 	}
 
 	manifestData, err := json.MarshalIndent(manifest, "", "  ")

@@ -212,8 +212,8 @@ func sanitizePublishablePath(value string, prepared *preparedScenario) string {
 	replacements := [][2]string{
 		{prepared.placeholderContext["baseline_python"], "<baseline-python>"},
 		{prepared.placeholderContext["go_binary"], "<go-binary>"},
+		{prepared.placeholderContext["legacy_repo"], "<legacy-repo>"},
 		{prepared.repoRoot, "<repo-root>"},
-		{"/root/web-log-parser", "<legacy-repo>"},
 		{"/tmp", "<tmp>"},
 	}
 	sanitized := value

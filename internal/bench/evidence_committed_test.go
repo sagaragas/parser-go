@@ -88,6 +88,47 @@ func TestCommittedBenchmarkHomelabEvidencePinsMeasuredRewriteRevision(t *testing
 	}
 }
 
+func TestCommittedBenchmarkScenariosAvoidMachineLocalPaths(t *testing.T) {
+	t.Parallel()
+
+	scenarioDir := filepath.Join(committedBenchmarkRepoRoot(t), "benchmark", "scenarios")
+	entries, err := os.ReadDir(scenarioDir)
+	if err != nil {
+		t.Fatalf("read benchmark scenarios: %v", err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+
+		path := filepath.Join(scenarioDir, entry.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read scenario %q: %v", entry.Name(), err)
+		}
+		text := string(data)
+
+		if strings.Contains(text, machineLocalLegacyRepoPath()) {
+			t.Fatalf("scenario %q still leaks the machine-local legacy repo path", entry.Name())
+		}
+		if strings.Contains(text, machineLocalRepoPath()) {
+			t.Fatalf("scenario %q still leaks the machine-local repo path", entry.Name())
+		}
+		if strings.Contains(text, "{{legacy_repo}}") && !strings.Contains(text, "\"repo_path\": \"{{legacy_repo}}\"") {
+			t.Fatalf("scenario %q should use the legacy_repo placeholder consistently", entry.Name())
+		}
+	}
+}
+
+func machineLocalLegacyRepoPath() string {
+	return filepath.Join(string(filepath.Separator), "root", "web-log-parser")
+}
+
+func machineLocalRepoPath() string {
+	return filepath.Join(string(filepath.Separator), "root", "parser-go")
+}
+
 func committedBenchmarkRepoRoot(t *testing.T) string {
 	t.Helper()
 

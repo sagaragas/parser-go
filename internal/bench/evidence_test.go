@@ -287,7 +287,8 @@ func TestBundleValidationRejectsForbiddenMarkers(t *testing.T) {
 	t.Parallel()
 
 	tempDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(tempDir, "manifest.json"), []byte("repo=/root/parser-go\n"), 0o644); err != nil {
+	repoLeak := filepath.Join(string(filepath.Separator), "root", "parser-go")
+	if err := os.WriteFile(filepath.Join(tempDir, "manifest.json"), []byte("repo="+repoLeak+"\n"), 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
 
@@ -398,6 +399,7 @@ func TestPublishEvidenceSetSanitizesCrossCheckAndPropagatesRewriteRevision(t *te
 	defer server.Close()
 
 	rewriteRevision := "rewrite-revision-1234567"
+	legacyRepoPath := filepath.Join(tempDir, "legacy-repo")
 	manifest := RunManifest{
 		ScenarioID:          "homelab-illustrative",
 		ScenarioDescription: "homelab publishable evidence traceability test",
@@ -427,7 +429,7 @@ func TestPublishEvidenceSetSanitizesCrossCheckAndPropagatesRewriteRevision(t *te
 		},
 		Baseline: ImplementationManifest{
 			Name:        "legacy-python",
-			Command:     []string{filepath.Join(tempDir, ".venv", "bin", "python"), filepath.Join(tempDir, "benchmark", "support", "legacy_baseline_adapter.py"), "--legacy-repo", "/root/web-log-parser", "--corpus", corpusPath, "--out", filepath.Join(tempDir, "workspace", "baseline", "output.json")},
+			Command:     []string{filepath.Join(tempDir, ".venv", "bin", "python"), filepath.Join(tempDir, "benchmark", "support", "legacy_baseline_adapter.py"), "--legacy-repo", legacyRepoPath, "--corpus", corpusPath, "--out", filepath.Join(tempDir, "workspace", "baseline", "output.json")},
 			WorkingDir:  filepath.Join(tempDir, "workspace", "baseline"),
 			Version:     "Python 3.11.2",
 			GitRevision: "904f838ddce5defc8715f2e444063520b7b0d612",
@@ -468,6 +470,7 @@ func TestPublishEvidenceSetSanitizesCrossCheckAndPropagatesRewriteRevision(t *te
 		placeholderContext: map[string]string{
 			"baseline_python": filepath.Join(tempDir, ".venv", "bin", "python"),
 			"go_binary":       filepath.Join(tempDir, ".factory", "bin", "go"),
+			"legacy_repo":     legacyRepoPath,
 			"repo_root":       tempDir,
 		},
 	}

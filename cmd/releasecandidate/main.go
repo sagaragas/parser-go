@@ -33,6 +33,11 @@ func main() {
 	if out == "" {
 		out = filepath.Join(root, "dist", "release-candidate")
 	}
+	out, err := filepath.Abs(out)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "resolve output directory: %v\n", err)
+		os.Exit(1)
+	}
 
 	manifest, err := releasecandidate.Generate(root, out)
 	if err != nil {
@@ -40,7 +45,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Fprintf(os.Stdout, "release-candidate tree: %s\n", manifest.TreeRoot)
-	fmt.Fprintf(os.Stdout, "release-candidate archive: %s\n", manifest.ArchivePath)
+	fmt.Fprintf(os.Stdout, "release-candidate tree: %s\n", filepath.ToSlash(filepath.Join(out, filepath.FromSlash(manifest.TreeRoot))))
+	fmt.Fprintf(os.Stdout, "release-candidate archive: %s\n", filepath.ToSlash(filepath.Join(out, filepath.FromSlash(manifest.ArchivePath))))
 	fmt.Fprintf(os.Stdout, "release-candidate manifest: %s\n", filepath.ToSlash(filepath.Join(out, "manifest.json")))
 }

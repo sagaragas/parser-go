@@ -25,7 +25,7 @@
       "{{baseline_python}}",
       "{{repo_root}}/benchmark/support/legacy_baseline_adapter.py",
       "--legacy-repo",
-      "/root/web-log-parser",
+      "{{legacy_repo}}",
       "--corpus",
       "{{corpus}}",
       "--out",
@@ -36,10 +36,10 @@
       "--version"
     ],
     "required_paths": [
-      "/root/web-log-parser",
+      "{{legacy_repo}}",
       "{{repo_root}}/benchmark/support/legacy_baseline_adapter.py"
     ],
-    "repo_path": "/root/web-log-parser",
+    "repo_path": "{{legacy_repo}}",
     "controls": {
       "warmup_iterations": 1,
       "measured_iterations": 2,

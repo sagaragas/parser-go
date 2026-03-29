@@ -191,6 +191,7 @@ func prepareScenario(repoRoot string, opts RunOptions) (*preparedScenario, error
 		"repo_root":       repoRoot,
 		"go_binary":       filepath.Join(repoRoot, ".factory", "bin", "go"),
 		"baseline_python": baselinePython(opts),
+		"legacy_repo":     legacyRepoRoot(repoRoot),
 		"corpus":          corpusPath,
 		"format":          scenario.Corpus.Format,
 		"profile":         scenario.Corpus.Profile,
@@ -630,6 +631,13 @@ func baselinePython(opts RunOptions) string {
 		return opts.BaselinePython
 	}
 	return os.Getenv("BENCH_BASELINE_PYTHON")
+}
+
+func legacyRepoRoot(repoRoot string) string {
+	if override := strings.TrimSpace(os.Getenv("BENCH_LEGACY_REPO")); override != "" {
+		return override
+	}
+	return filepath.Join(filepath.Dir(repoRoot), "web-log-parser")
 }
 
 func ensureCommandAvailable(command string) error {

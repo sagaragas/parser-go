@@ -30,6 +30,19 @@ The current public benchmark set is `evidence/benchmark-homelab-20260328/`. Its 
   - `evidence/benchmark-homelab-20260328/homelab-jellyfin-illustrative/redaction/report.json`
   - `evidence/benchmark-homelab-20260328/homelab-jellyfin-illustrative/service-integration/cross-check.json`
 
+## Claim map
+
+| Claim | Where it appears | Evidence to check |
+| --- | --- | --- |
+| `2/2 scenarios passed` parity | `README.md`, `wiki/Benchmark-Methodology.md`, and `ragas-dev/content/blog/rewriting-a-python-web-log-parser-in-go.mdx` | `evidence/benchmark-homelab-20260328/index.json` plus each scenario's `parity/parity.json` |
+| `synthetic-small` mean wall time dropped from `150.29 ms` to `78.69 ms` | Article frontmatter metrics, article results table, and article body | `evidence/benchmark-homelab-20260328/synthetic-small/parity/aggregate-summary.json` |
+| `homelab-jellyfin-illustrative` mean wall time dropped from `143.15 ms` to `73.28 ms` | Article frontmatter metrics, article results table, and article body | `evidence/benchmark-homelab-20260328/homelab-jellyfin-illustrative/parity/aggregate-summary.json` |
+| The homelab-backed same-run trace resolves to `18` total requests with a `12` / `6` ranked split | `wiki/Homelab-Validation.md` and the article's "Correctness came first" section | `evidence/benchmark-homelab-20260328/homelab-jellyfin-illustrative/service-integration/cross-check.json` and `evidence/benchmark-homelab-20260328/homelab-jellyfin-illustrative/rewrite/normalized-summary.json` |
+| The homelab-backed scenario is sanitized, illustrative, and tied to one bounded capture window | `wiki/Corpus-and-Sanitization.md`, `wiki/Benchmark-Methodology.md`, and the article's methodology and limitations sections | `evidence/benchmark-homelab-20260328/homelab-jellyfin-illustrative/manifest.json`, `evidence/benchmark-homelab-20260328/homelab-jellyfin-illustrative/redaction/report.json`, and `evidence/benchmark-homelab-20260328/homelab-jellyfin-illustrative/redaction/scan.json` |
+| The measured revision is pinned to `dc01cf104ef86c2d3a755b84bcae1203e1a4b15d` across the repo and article | `README.md`, `wiki/Home.md`, `wiki/Benchmark-Methodology.md`, and the article reproducibility section | `evidence/benchmark-homelab-20260328/index.json` and each scenario `manifest.json` |
+
+No charts or screenshots are committed for this article. The publishable article asset is the MDX source itself, so the metric cards and quoted result lines in `ragas-dev/content/blog/rewriting-a-python-web-log-parser-in-go.mdx` should resolve back to the aggregate summaries and cross-check file above.
+
 ## How to trace a claim
 
 1. Start at `evidence/benchmark-homelab-20260328/index.json` for the scenario id, corpus hash, representation, and measured rewrite revision.
