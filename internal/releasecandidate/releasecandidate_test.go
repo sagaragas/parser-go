@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -75,6 +77,7 @@ func TestGenerateProducesPublishablePaths(t *testing.T) {
 
 	repoRoot := committedReleaseCandidateRepoRoot(t)
 	outputDir := filepath.Join(t.TempDir(), "release-candidate")
+	rawHostLiterals := benchmarkHostFingerprintLiterals(t, repoRoot)
 
 	manifest, err := Generate(repoRoot, outputDir)
 	if err != nil {
@@ -138,10 +141,10 @@ func TestGenerateProducesPublishablePaths(t *testing.T) {
 		t.Fatal("expected generated evidence index to avoid sibling checkout paths")
 	}
 
-	assertSanitizedBenchmarkEvidenceFile(t, filepath.Join(treeRoot, "evidence", "benchmark-homelab-20260328", "synthetic-small", "manifest.json"))
-	assertSanitizedBenchmarkEvidenceFile(t, filepath.Join(treeRoot, "evidence", "benchmark-homelab-20260328", "synthetic-small", "environment", "snapshot.json"))
-	assertSanitizedBenchmarkEvidenceFile(t, filepath.Join(treeRoot, "evidence", "benchmark-homelab-20260328", "homelab-jellyfin-illustrative", "manifest.json"))
-	assertSanitizedBenchmarkEvidenceFile(t, filepath.Join(treeRoot, "evidence", "benchmark-homelab-20260328", "homelab-jellyfin-illustrative", "environment", "snapshot.json"))
+	assertSanitizedBenchmarkEvidenceFile(t, filepath.Join(treeRoot, "evidence", "benchmark-homelab-20260328", "synthetic-small", "manifest.json"), rawHostLiterals)
+	assertSanitizedBenchmarkEvidenceFile(t, filepath.Join(treeRoot, "evidence", "benchmark-homelab-20260328", "synthetic-small", "environment", "snapshot.json"), rawHostLiterals)
+	assertSanitizedBenchmarkEvidenceFile(t, filepath.Join(treeRoot, "evidence", "benchmark-homelab-20260328", "homelab-jellyfin-illustrative", "manifest.json"), rawHostLiterals)
+	assertSanitizedBenchmarkEvidenceFile(t, filepath.Join(treeRoot, "evidence", "benchmark-homelab-20260328", "homelab-jellyfin-illustrative", "environment", "snapshot.json"), rawHostLiterals)
 
 	scenarioDir := filepath.Join(treeRoot, "benchmark", "scenarios")
 	entries, err := os.ReadDir(scenarioDir)
@@ -374,7 +377,70 @@ func archiveMembers(t *testing.T, archivePath string) []string {
 	return members
 }
 
-func assertSanitizedBenchmarkEvidenceFile(t *testing.T, path string) {
+func benchmarkHostFingerprintLiterals(t *testing.T, repoRoot string) []string {
+	t.Helper()
+
+	type hostFields struct {
+		Kernel        string `json:"kernel"`
+		CPUModel      string `json:"cpu_model"`
+		TotalRAMBytes uint64 `json:"total_ram_bytes"`
+	}
+
+	literals := map[string]struct{}{}
+	addFields := func(fields hostFields) {
+		if fields.Kernel != "" {
+			literals[fields.Kernel] = struct{}{}
+		}
+		if fields.CPUModel != "" {
+			literals[fields.CPUModel] = struct{}{}
+		}
+		if fields.TotalRAMBytes != 0 {
+			literals[strconv.FormatUint(fields.TotalRAMBytes, 10)] = struct{}{}
+		}
+	}
+
+	readJSON := func(rel string, target any) {
+		t.Helper()
+
+		path := filepath.Join(repoRoot, filepath.FromSlash(rel))
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read source evidence file %q: %v", rel, err)
+		}
+		if err := json.Unmarshal(data, target); err != nil {
+			t.Fatalf("decode source evidence file %q: %v", rel, err)
+		}
+	}
+
+	for _, rel := range []string{
+		"evidence/benchmark-homelab-20260328/synthetic-small/environment/snapshot.json",
+		"evidence/benchmark-homelab-20260328/homelab-jellyfin-illustrative/environment/snapshot.json",
+	} {
+		var host hostFields
+		readJSON(rel, &host)
+		addFields(host)
+	}
+
+	for _, rel := range []string{
+		"evidence/benchmark-homelab-20260328/synthetic-small/manifest.json",
+		"evidence/benchmark-homelab-20260328/homelab-jellyfin-illustrative/manifest.json",
+	} {
+		var manifest struct {
+			Host hostFields `json:"host"`
+		}
+		readJSON(rel, &manifest)
+		addFields(manifest.Host)
+	}
+
+	values := make([]string, 0, len(literals))
+	for value := range literals {
+		values = append(values, value)
+	}
+	sort.Strings(values)
+	return values
+}
+
+func assertSanitizedBenchmarkEvidenceFile(t *testing.T, path string, rawHostLiterals []string) {
 	t.Helper()
 
 	data, err := os.ReadFile(path)
@@ -383,17 +449,15 @@ func assertSanitizedBenchmarkEvidenceFile(t *testing.T, path string) {
 	}
 
 	text := string(data)
-	for _, forbidden := range []string{
-		`"kernel":`,
-		`"cpu_model":`,
-		`"logical_cores":`,
-		`"total_ram_bytes":`,
-		`12th Gen Intel(R) Core(TM) i5-12500T`,
-		`6.17.13-1-pve`,
-		`41943040000`,
-	} {
+	for _, forbiddenKey := range []string{"kernel", "cpu_model", "logical_cores", "total_ram_bytes"} {
+		forbidden := jsonFieldLiteral(forbiddenKey)
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("benchmark evidence file %q still leaks %q", path, forbidden)
+		}
+	}
+	for _, forbidden := range rawHostLiterals {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("benchmark evidence file %q still leaks raw host literal %q", path, forbidden)
 		}
 	}
 
@@ -408,4 +472,8 @@ func assertSanitizedBenchmarkEvidenceFile(t *testing.T, path string) {
 			t.Fatalf("benchmark evidence file %q is missing sanitized field %q", path, required)
 		}
 	}
+}
+
+func jsonFieldLiteral(key string) string {
+	return `"` + key + `":`
 }

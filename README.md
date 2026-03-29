@@ -62,4 +62,4 @@ This repo now includes a generator for a public-safe release-candidate tree and 
 go run ./cmd/releasecandidate
 ```
 
-From the internal mission checkout, the standalone public launch root is `dist/release-candidate/tree/parser-go/`. The generated tree and archive exclude `.factory/`, `HOMELAB_LOG_SOURCES.md`, `benchmark/results/`, local toolchains, and other mission-only or temporary paths.
+The command writes a standalone public launch tree to `dist/release-candidate/tree/parser-go/`. The generated tree and archive exclude `.factory/`, `HOMELAB_LOG_SOURCES.md`, `benchmark/results/`, local toolchains, and other mission-only or temporary paths.

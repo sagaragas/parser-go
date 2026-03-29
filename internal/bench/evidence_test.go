@@ -420,10 +420,10 @@ func TestPublishEvidenceSetSanitizesCrossCheckAndPropagatesRewriteRevision(t *te
 		Host: HostSnapshot{
 			OS:            "linux",
 			Architecture:  "amd64",
-			Kernel:        "6.17.13-1-pve",
-			CPUModel:      "12th Gen Intel(R) Core(TM) i5-12500T",
+			Kernel:        "6.8.0-bench-test",
+			CPUModel:      "Synthetic Benchmark CPU",
 			LogicalCores:  12,
-			TotalRAMBytes: 41943040000,
+			TotalRAMBytes: 48 * 1024 * 1024 * 1024,
 			GoVersion:     "go version go1.26.0 linux/amd64",
 			PythonVersion: "Python 3.11.2",
 		},
