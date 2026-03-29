@@ -1,8 +1,12 @@
 package releasecandidate
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"encoding/json"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -126,6 +130,68 @@ func TestGenerateProducesPublishablePaths(t *testing.T) {
 	}
 }
 
+func TestGenerateIncludesTrackedFilesOnly(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := tempGitRepo(t, map[string]string{
+		".factory/services.yaml":           "commands: {}\n",
+		"HOMELAB_LOG_SOURCES.md":           "mission-only\n",
+		"LICENSE":                          "Apache-2.0\n",
+		"README.md":                        "# parser-go\n",
+		"benchmark/results/.gitignore":     "*\n",
+		"benchmark/scenarios/example.json": "{\n  \"id\": \"example\"\n}\n",
+		"wiki/Home.md":                     "# Home\n",
+	})
+	writeRepoFile(t, repoRoot, "local-notes.txt", "do not publish\n")
+	writeRepoFile(t, repoRoot, "tmp/runtime.txt", "temporary data\n")
+
+	outputDir := filepath.Join(t.TempDir(), "release-candidate")
+	manifest, err := Generate(repoRoot, outputDir)
+	if err != nil {
+		t.Fatalf("generate release candidate: %v", err)
+	}
+
+	wantIncluded := []string{
+		"LICENSE",
+		"README.md",
+		"benchmark/scenarios/example.json",
+		"wiki/Home.md",
+	}
+	if !reflect.DeepEqual(manifest.IncludedFiles, wantIncluded) {
+		t.Fatalf("included_files = %#v, want %#v", manifest.IncludedFiles, wantIncluded)
+	}
+
+	treeRoot := filepath.Join(outputDir, filepath.FromSlash(releaseTreeRoot))
+	for _, rel := range wantIncluded {
+		if _, err := os.Stat(filepath.Join(treeRoot, filepath.FromSlash(rel))); err != nil {
+			t.Fatalf("expected tracked publishable file %q in release tree: %v", rel, err)
+		}
+	}
+
+	for _, rel := range []string{
+		".factory/services.yaml",
+		"HOMELAB_LOG_SOURCES.md",
+		"benchmark/results/.gitignore",
+		"local-notes.txt",
+		"tmp/runtime.txt",
+	} {
+		if _, err := os.Stat(filepath.Join(treeRoot, filepath.FromSlash(rel))); !os.IsNotExist(err) {
+			t.Fatalf("unexpected file %q present in release tree, err=%v", rel, err)
+		}
+	}
+
+	archiveMembers := archiveMembers(t, filepath.Join(outputDir, releaseArchiveName))
+	wantArchiveMembers := []string{
+		"parser-go/LICENSE",
+		"parser-go/README.md",
+		"parser-go/benchmark/scenarios/example.json",
+		"parser-go/wiki/Home.md",
+	}
+	if !reflect.DeepEqual(archiveMembers, wantArchiveMembers) {
+		t.Fatalf("archive members = %#v, want %#v", archiveMembers, wantArchiveMembers)
+	}
+}
+
 func machineLocalLegacyRepoPath() string {
 	return filepath.Join(string(filepath.Separator), "root", "web-log-parser")
 }
@@ -142,4 +208,72 @@ func committedReleaseCandidateRepoRoot(t *testing.T) string {
 		t.Fatal("resolve test file path")
 	}
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+}
+
+func tempGitRepo(t *testing.T, files map[string]string) string {
+	t.Helper()
+
+	repoRoot := t.TempDir()
+	for rel, contents := range files {
+		writeRepoFile(t, repoRoot, rel, contents)
+	}
+
+	gitCommand(t, repoRoot, "init", "-q")
+	gitCommand(t, repoRoot, "config", "user.name", "Release Candidate Test")
+	gitCommand(t, repoRoot, "config", "user.email", "release-candidate-test@example.com")
+	gitCommand(t, repoRoot, "add", ".")
+	gitCommand(t, repoRoot, "commit", "-q", "-m", "initial import")
+	return repoRoot
+}
+
+func writeRepoFile(t *testing.T, repoRoot, rel, contents string) {
+	t.Helper()
+
+	path := filepath.Join(repoRoot, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create parent for %q: %v", rel, err)
+	}
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write %q: %v", rel, err)
+	}
+}
+
+func gitCommand(t *testing.T, repoRoot string, args ...string) {
+	t.Helper()
+
+	cmd := exec.Command("git", append([]string{"-C", repoRoot}, args...)...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, output)
+	}
+}
+
+func archiveMembers(t *testing.T, archivePath string) []string {
+	t.Helper()
+
+	file, err := os.Open(archivePath)
+	if err != nil {
+		t.Fatalf("open archive %q: %v", archivePath, err)
+	}
+	defer file.Close()
+
+	gzipReader, err := gzip.NewReader(file)
+	if err != nil {
+		t.Fatalf("open gzip reader for %q: %v", archivePath, err)
+	}
+	defer gzipReader.Close()
+
+	tarReader := tar.NewReader(gzipReader)
+	var members []string
+	for {
+		header, err := tarReader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("read archive member from %q: %v", archivePath, err)
+		}
+		members = append(members, header.Name)
+	}
+	return members
 }

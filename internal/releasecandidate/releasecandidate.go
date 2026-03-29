@@ -40,9 +40,9 @@ var excludedPaths = map[string]struct{}{
 }
 
 const (
-	releaseArchiveName        = "parser-go-release-candidate.tar.gz"
-	releaseTreeRoot           = "tree/parser-go"
-	releaseManifestRepoRoot   = "<repo-root>"
+	releaseArchiveName      = "parser-go-release-candidate.tar.gz"
+	releaseTreeRoot         = "tree/parser-go"
+	releaseManifestRepoRoot = "<repo-root>"
 )
 
 type Manifest struct {
@@ -180,7 +180,7 @@ func exclusionRules() []string {
 }
 
 func trackedFiles(repoRoot string) ([]string, error) {
-	cmd := exec.Command("git", "-C", repoRoot, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
+	cmd := exec.Command("git", "-C", repoRoot, "ls-files", "--cached", "-z")
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("list release-candidate files: %w", err)
