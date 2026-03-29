@@ -32,6 +32,8 @@ func TestIncludePath(t *testing.T) {
 		{path: "swap.swp", want: false},
 		{path: "wiki/Home.md", want: false},
 		{path: "evidence/index.json", want: false},
+		{path: "cmd/releasecandidate/main.go", want: false},
+		{path: "internal/releasecandidate/releasecandidate.go", want: false},
 	}
 
 	for _, tc := range tests {
@@ -124,13 +126,13 @@ func TestGenerateProducesCleanTree(t *testing.T) {
 		t.Fatalf("expected generated go.mod to use the public module path, got %q", strings.TrimSpace(string(goMod)))
 	}
 
-	for _, excluded := range []string{"wiki", "evidence", ".factory", "HOMELAB_LOG_SOURCES.md"} {
+	for _, excluded := range []string{"wiki", "evidence", ".factory", "HOMELAB_LOG_SOURCES.md", "cmd/releasecandidate", "internal/releasecandidate"} {
 		if _, err := os.Stat(filepath.Join(treeRoot, excluded)); !os.IsNotExist(err) {
 			t.Fatalf("expected %q to be excluded from release tree", excluded)
 		}
 	}
 
-	for _, required := range []string{"README.md", "LICENSE", "go.mod", "cmd/parsergo/main.go"} {
+	for _, required := range []string{"README.md", "LICENSE", "go.mod", "cmd/parsergo/main.go", "Dockerfile", ".github/workflows/ci.yml"} {
 		if _, err := os.Stat(filepath.Join(treeRoot, filepath.FromSlash(required))); err != nil {
 			t.Fatalf("expected %q in release tree: %v", required, err)
 		}
@@ -169,8 +171,10 @@ func TestGenerateIncludesTrackedFilesOnly(t *testing.T) {
 		"README.md":                             "# parser-go\n",
 		"SECURITY.md":                           "# Security\n",
 		"benchmark/scenarios/example.json":      "{\n  \"id\": \"example\"\n}\n",
-		"wiki/Home.md":                          "# Home\n",
-		"evidence/index.json":                   "{}\n",
+		"wiki/Home.md":                                    "# Home\n",
+		"evidence/index.json":                             "{}\n",
+		"cmd/releasecandidate/main.go":                    "package main\n",
+		"internal/releasecandidate/releasecandidate.go":   "package releasecandidate\n",
 	})
 	writeRepoFile(t, repoRoot, "local-notes.txt", "do not publish\n")
 
@@ -201,6 +205,8 @@ func TestGenerateIncludesTrackedFilesOnly(t *testing.T) {
 		"local-notes.txt",
 		"wiki/Home.md",
 		"evidence/index.json",
+		"cmd/releasecandidate/main.go",
+		"internal/releasecandidate/releasecandidate.go",
 	} {
 		if _, err := os.Stat(filepath.Join(treeRoot, filepath.FromSlash(excluded))); !os.IsNotExist(err) {
 			t.Fatalf("unexpected file %q present in release tree", excluded)

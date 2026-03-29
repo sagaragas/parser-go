@@ -42,6 +42,11 @@ var excludedPaths = map[string]struct{}{
 	"internal/bench/evidence_committed_test.go": {},
 }
 
+var excludedExactPrefixes = []string{
+	"cmd/releasecandidate/",
+	"internal/releasecandidate/",
+}
+
 const (
 	releaseArchiveName      = "parser-go-release-candidate.tar.gz"
 	releaseTreeRoot         = "tree/parser-go"
@@ -219,6 +224,12 @@ func includePath(rel string) bool {
 		}
 	}
 
+	for _, prefix := range excludedExactPrefixes {
+		if strings.HasPrefix(rel, prefix) {
+			return false
+		}
+	}
+
 	for _, suffix := range []string{"~", ".swp", ".swo", ".temp", ".tmp"} {
 		if strings.HasSuffix(rel, suffix) {
 			return false
@@ -229,8 +240,11 @@ func includePath(rel string) bool {
 }
 
 func exclusionRules() []string {
-	rules := make([]string, 0, len(excludedPrefixes)+len(excludedPaths)+5)
+	rules := make([]string, 0, len(excludedPrefixes)+len(excludedExactPrefixes)+len(excludedPaths)+5)
 	for _, prefix := range excludedPrefixes {
+		rules = append(rules, prefix+"*")
+	}
+	for _, prefix := range excludedExactPrefixes {
 		rules = append(rules, prefix+"*")
 	}
 	for path := range excludedPaths {
