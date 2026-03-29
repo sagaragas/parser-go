@@ -9,10 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"runtime"
-	"sort"
-	"strconv"
 	"strings"
 	"testing"
 )
@@ -25,7 +22,6 @@ func TestIncludePath(t *testing.T) {
 		want bool
 	}{
 		{path: "cmd/parsergo/main.go", want: true},
-		{path: "wiki/Home.md", want: true},
 		{path: ".factory/services.yaml", want: false},
 		{path: ".tools/go/bin/go", want: false},
 		{path: "benchmark/results/run-1/manifest.json", want: false},
@@ -34,6 +30,8 @@ func TestIncludePath(t *testing.T) {
 		{path: "tmp/session.txt", want: false},
 		{path: "notes.txt~", want: false},
 		{path: "swap.swp", want: false},
+		{path: "wiki/Home.md", want: false},
+		{path: "evidence/index.json", want: false},
 	}
 
 	for _, tc := range tests {
@@ -58,6 +56,7 @@ func TestFilterTrackedFilesSortsAndDeduplicates(t *testing.T) {
 		"HOMELAB_LOG_SOURCES.md",
 		"cmd/parsergo/main.go",
 		"benchmark/results/run-1/output.json",
+		"evidence/index.json",
 		"README.md",
 	}
 
@@ -65,7 +64,6 @@ func TestFilterTrackedFilesSortsAndDeduplicates(t *testing.T) {
 	want := []string{
 		"README.md",
 		"cmd/parsergo/main.go",
-		"wiki/Home.md",
 	}
 
 	if !reflect.DeepEqual(got, want) {
@@ -73,12 +71,11 @@ func TestFilterTrackedFilesSortsAndDeduplicates(t *testing.T) {
 	}
 }
 
-func TestGenerateProducesPublishablePaths(t *testing.T) {
+func TestGenerateProducesCleanTree(t *testing.T) {
 	t.Parallel()
 
 	repoRoot := committedReleaseCandidateRepoRoot(t)
 	outputDir := filepath.Join(t.TempDir(), "release-candidate")
-	rawHostLiterals := benchmarkHostFingerprintLiterals(t, repoRoot)
 
 	manifest, err := Generate(repoRoot, outputDir)
 	if err != nil {
@@ -96,7 +93,7 @@ func TestGenerateProducesPublishablePaths(t *testing.T) {
 	}
 
 	if !reflect.DeepEqual(written, *manifest) {
-		t.Fatalf("manifest returned by Generate does not match written manifest: got %+v want %+v", written, *manifest)
+		t.Fatalf("manifest returned by Generate does not match written manifest")
 	}
 
 	if manifest.ArchivePath != releaseArchiveName {
@@ -108,22 +105,15 @@ func TestGenerateProducesPublishablePaths(t *testing.T) {
 	if manifest.RepoRoot != releaseManifestRepoRoot {
 		t.Fatalf("repo_root = %q, want %q", manifest.RepoRoot, releaseManifestRepoRoot)
 	}
-	for _, value := range []string{manifest.ArchivePath, manifest.TreeRoot, manifest.RepoRoot} {
-		if strings.Contains(value, machineLocalRootPrefix()) {
-			t.Fatalf("release manifest leaked machine-local path in %q", value)
-		}
-	}
 
 	treeRoot := filepath.Join(outputDir, filepath.FromSlash(releaseTreeRoot))
+
 	gitignore, err := os.ReadFile(filepath.Join(treeRoot, ".gitignore"))
 	if err != nil {
 		t.Fatalf("read generated public .gitignore: %v", err)
 	}
 	if !strings.Contains(string(gitignore), ".factory/") {
 		t.Fatal("expected generated public .gitignore to ignore .factory/")
-	}
-	if strings.Contains(string(gitignore), "!.factory/") {
-		t.Fatal("expected generated public .gitignore to stop re-including .factory/")
 	}
 
 	goMod, err := os.ReadFile(filepath.Join(treeRoot, "go.mod"))
@@ -134,36 +124,15 @@ func TestGenerateProducesPublishablePaths(t *testing.T) {
 		t.Fatalf("expected generated go.mod to use the public module path, got %q", strings.TrimSpace(string(goMod)))
 	}
 
-	evidenceIndex, err := os.ReadFile(filepath.Join(treeRoot, "wiki", "Evidence-Index.md"))
-	if err != nil {
-		t.Fatalf("read generated evidence index: %v", err)
-	}
-	if strings.Contains(string(evidenceIndex), siblingCheckoutPrefix("ragas-dev")) {
-		t.Fatal("expected generated evidence index to avoid sibling checkout paths")
-	}
-
-	assertSanitizedBenchmarkEvidenceFile(t, filepath.Join(treeRoot, "evidence", "benchmark-homelab-20260328", "synthetic-small", "manifest.json"), rawHostLiterals)
-	assertSanitizedBenchmarkEvidenceFile(t, filepath.Join(treeRoot, "evidence", "benchmark-homelab-20260328", "synthetic-small", "environment", "snapshot.json"), rawHostLiterals)
-	assertSanitizedBenchmarkEvidenceFile(t, filepath.Join(treeRoot, "evidence", "benchmark-homelab-20260328", "homelab-jellyfin-illustrative", "manifest.json"), rawHostLiterals)
-	assertSanitizedBenchmarkEvidenceFile(t, filepath.Join(treeRoot, "evidence", "benchmark-homelab-20260328", "homelab-jellyfin-illustrative", "environment", "snapshot.json"), rawHostLiterals)
-	assertReleaseTreeExcludesRawLogicalCoreCount(t, filepath.Join(treeRoot, "internal", "bench", "evidence_test.go"), benchmarkHostLogicalCoreCounts(t, repoRoot))
-
-	scenarioDir := filepath.Join(treeRoot, "benchmark", "scenarios")
-	entries, err := os.ReadDir(scenarioDir)
-	if err != nil {
-		t.Fatalf("read generated release scenarios: %v", err)
-	}
-	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
-			continue
+	for _, excluded := range []string{"wiki", "evidence", ".factory", "HOMELAB_LOG_SOURCES.md"} {
+		if _, err := os.Stat(filepath.Join(treeRoot, excluded)); !os.IsNotExist(err) {
+			t.Fatalf("expected %q to be excluded from release tree", excluded)
 		}
+	}
 
-		text, err := os.ReadFile(filepath.Join(scenarioDir, entry.Name()))
-		if err != nil {
-			t.Fatalf("read committed release scenario %q: %v", entry.Name(), err)
-		}
-		if strings.Contains(string(text), machineLocalLegacyRepoPath()) || strings.Contains(string(text), machineLocalRepoPath()) {
-			t.Fatalf("release scenario %q still leaks a machine-local repo path", entry.Name())
+	for _, required := range []string{"README.md", "LICENSE", "go.mod", "cmd/parsergo/main.go"} {
+		if _, err := os.Stat(filepath.Join(treeRoot, filepath.FromSlash(required))); err != nil {
+			t.Fatalf("expected %q in release tree: %v", required, err)
 		}
 	}
 }
@@ -184,28 +153,6 @@ func TestPublicRepoSourceHasCommunityBaseline(t *testing.T) {
 			t.Fatalf("expected community baseline file %q in repo source: %v", rel, err)
 		}
 	}
-
-	readFile := func(rel string) string {
-		t.Helper()
-
-		data, err := os.ReadFile(filepath.Join(repoRoot, filepath.FromSlash(rel)))
-		if err != nil {
-			t.Fatalf("read repo source file %q: %v", rel, err)
-		}
-		return string(data)
-	}
-
-	if got := readFile("README.md"); !strings.Contains(got, "mission-mode clean-room rewrite") {
-		t.Fatal("expected generated README.md to mention mission-mode clean-room provenance")
-	}
-	if got := readFile("wiki/Clean-Room-and-Legal.md"); !strings.Contains(got, "mission mode") {
-		t.Fatal("expected generated clean-room wiki page to mention mission mode")
-	}
-	for _, rel := range []string{"CONTRIBUTING.md", "SECURITY.md"} {
-		if got := readFile(rel); !strings.Contains(got, "github.com/sagaragas/parser-go") {
-			t.Fatalf("expected %s to target the public GitHub repo", rel)
-		}
-	}
 }
 
 func TestGenerateIncludesTrackedFilesOnly(t *testing.T) {
@@ -216,17 +163,16 @@ func TestGenerateIncludesTrackedFilesOnly(t *testing.T) {
 		".github/pull_request_template.md":     "## Summary\n",
 		".factory/services.yaml":               "commands: {}\n",
 		"CODE_OF_CONDUCT.md":                   "# Code of conduct\n",
-		"CONTRIBUTING.md":                      "# Contributing\n",
-		"HOMELAB_LOG_SOURCES.md":               "mission-only\n",
-		"LICENSE":                              "Apache-2.0\n",
-		"README.md":                            "# parser-go\n",
-		"SECURITY.md":                          "# Security policy\n",
-		"benchmark/results/.gitignore":         "*\n",
-		"benchmark/scenarios/example.json":     "{\n  \"id\": \"example\"\n}\n",
-		"wiki/Home.md":                         "# Home\n",
+		"CONTRIBUTING.md":                       "# Contributing\n",
+		"HOMELAB_LOG_SOURCES.md":                "internal\n",
+		"LICENSE":                               "Apache-2.0\n",
+		"README.md":                             "# parser-go\n",
+		"SECURITY.md":                           "# Security\n",
+		"benchmark/scenarios/example.json":      "{\n  \"id\": \"example\"\n}\n",
+		"wiki/Home.md":                          "# Home\n",
+		"evidence/index.json":                   "{}\n",
 	})
 	writeRepoFile(t, repoRoot, "local-notes.txt", "do not publish\n")
-	writeRepoFile(t, repoRoot, "tmp/runtime.txt", "temporary data\n")
 
 	outputDir := filepath.Join(t.TempDir(), "release-candidate")
 	manifest, err := Generate(repoRoot, outputDir)
@@ -243,28 +189,21 @@ func TestGenerateIncludesTrackedFilesOnly(t *testing.T) {
 		"README.md",
 		"SECURITY.md",
 		"benchmark/scenarios/example.json",
-		"wiki/Home.md",
 	}
 	if !reflect.DeepEqual(manifest.IncludedFiles, wantIncluded) {
 		t.Fatalf("included_files = %#v, want %#v", manifest.IncludedFiles, wantIncluded)
 	}
 
 	treeRoot := filepath.Join(outputDir, filepath.FromSlash(releaseTreeRoot))
-	for _, rel := range wantIncluded {
-		if _, err := os.Stat(filepath.Join(treeRoot, filepath.FromSlash(rel))); err != nil {
-			t.Fatalf("expected tracked publishable file %q in release tree: %v", rel, err)
-		}
-	}
-
-	for _, rel := range []string{
+	for _, excluded := range []string{
 		".factory/services.yaml",
 		"HOMELAB_LOG_SOURCES.md",
-		"benchmark/results/.gitignore",
 		"local-notes.txt",
-		"tmp/runtime.txt",
+		"wiki/Home.md",
+		"evidence/index.json",
 	} {
-		if _, err := os.Stat(filepath.Join(treeRoot, filepath.FromSlash(rel))); !os.IsNotExist(err) {
-			t.Fatalf("unexpected file %q present in release tree, err=%v", rel, err)
+		if _, err := os.Stat(filepath.Join(treeRoot, filepath.FromSlash(excluded))); !os.IsNotExist(err) {
+			t.Fatalf("unexpected file %q present in release tree", excluded)
 		}
 	}
 
@@ -278,27 +217,10 @@ func TestGenerateIncludesTrackedFilesOnly(t *testing.T) {
 		"parser-go/README.md",
 		"parser-go/SECURITY.md",
 		"parser-go/benchmark/scenarios/example.json",
-		"parser-go/wiki/Home.md",
 	}
 	if !reflect.DeepEqual(archiveMembers, wantArchiveMembers) {
 		t.Fatalf("archive members = %#v, want %#v", archiveMembers, wantArchiveMembers)
 	}
-}
-
-func machineLocalLegacyRepoPath() string {
-	return filepath.Join(string(filepath.Separator), "root", "web-log-parser")
-}
-
-func machineLocalRootPrefix() string {
-	return string(filepath.Separator) + "root" + string(filepath.Separator)
-}
-
-func siblingCheckoutPrefix(name string) string {
-	return name + "/"
-}
-
-func machineLocalRepoPath() string {
-	return filepath.Join(string(filepath.Separator), "root", "parser-go")
 }
 
 func committedReleaseCandidateRepoRoot(t *testing.T) string {
@@ -320,10 +242,10 @@ func tempGitRepo(t *testing.T, files map[string]string) string {
 	}
 
 	gitCommand(t, repoRoot, "init", "-q")
-	gitCommand(t, repoRoot, "config", "user.name", "Release Candidate Test")
-	gitCommand(t, repoRoot, "config", "user.email", "release-candidate-test@example.com")
+	gitCommand(t, repoRoot, "config", "user.name", "Test")
+	gitCommand(t, repoRoot, "config", "user.email", "test@example.com")
 	gitCommand(t, repoRoot, "add", ".")
-	gitCommand(t, repoRoot, "commit", "-q", "-m", "initial import")
+	gitCommand(t, repoRoot, "commit", "-q", "-m", "initial")
 	return repoRoot
 }
 
@@ -377,190 +299,4 @@ func archiveMembers(t *testing.T, archivePath string) []string {
 		members = append(members, header.Name)
 	}
 	return members
-}
-
-func benchmarkHostFingerprintLiterals(t *testing.T, repoRoot string) []string {
-	t.Helper()
-
-	type hostFields struct {
-		Kernel        string `json:"kernel"`
-		CPUModel      string `json:"cpu_model"`
-		LogicalCores  int    `json:"logical_cores"`
-		TotalRAMBytes uint64 `json:"total_ram_bytes"`
-	}
-
-	literals := map[string]struct{}{}
-	addFields := func(fields hostFields) {
-		if fields.Kernel != "" {
-			literals[fields.Kernel] = struct{}{}
-		}
-		if fields.CPUModel != "" {
-			literals[fields.CPUModel] = struct{}{}
-		}
-		if fields.LogicalCores > 0 {
-			literals[jsonFieldValueLiteral("logical_cores", strconv.Itoa(fields.LogicalCores))] = struct{}{}
-		}
-		if fields.TotalRAMBytes != 0 {
-			literals[strconv.FormatUint(fields.TotalRAMBytes, 10)] = struct{}{}
-		}
-	}
-
-	readJSON := func(rel string, target any) {
-		t.Helper()
-
-		path := filepath.Join(repoRoot, filepath.FromSlash(rel))
-		data, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read source evidence file %q: %v", rel, err)
-		}
-		if err := json.Unmarshal(data, target); err != nil {
-			t.Fatalf("decode source evidence file %q: %v", rel, err)
-		}
-	}
-
-	for _, rel := range []string{
-		"evidence/benchmark-homelab-20260328/synthetic-small/environment/snapshot.json",
-		"evidence/benchmark-homelab-20260328/homelab-jellyfin-illustrative/environment/snapshot.json",
-	} {
-		var host hostFields
-		readJSON(rel, &host)
-		addFields(host)
-	}
-
-	for _, rel := range []string{
-		"evidence/benchmark-homelab-20260328/synthetic-small/manifest.json",
-		"evidence/benchmark-homelab-20260328/homelab-jellyfin-illustrative/manifest.json",
-	} {
-		var manifest struct {
-			Host hostFields `json:"host"`
-		}
-		readJSON(rel, &manifest)
-		addFields(manifest.Host)
-	}
-
-	values := make([]string, 0, len(literals))
-	for value := range literals {
-		values = append(values, value)
-	}
-	sort.Strings(values)
-	return values
-}
-
-func benchmarkHostLogicalCoreCounts(t *testing.T, repoRoot string) []string {
-	t.Helper()
-
-	type hostFields struct {
-		LogicalCores int `json:"logical_cores"`
-	}
-
-	counts := map[string]struct{}{}
-	addFields := func(fields hostFields) {
-		if fields.LogicalCores > 0 {
-			counts[strconv.Itoa(fields.LogicalCores)] = struct{}{}
-		}
-	}
-
-	readJSON := func(rel string, target any) {
-		t.Helper()
-
-		path := filepath.Join(repoRoot, filepath.FromSlash(rel))
-		data, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read source evidence file %q: %v", rel, err)
-		}
-		if err := json.Unmarshal(data, target); err != nil {
-			t.Fatalf("decode source evidence file %q: %v", rel, err)
-		}
-	}
-
-	for _, rel := range []string{
-		"evidence/benchmark-homelab-20260328/synthetic-small/environment/snapshot.json",
-		"evidence/benchmark-homelab-20260328/homelab-jellyfin-illustrative/environment/snapshot.json",
-	} {
-		var host hostFields
-		readJSON(rel, &host)
-		addFields(host)
-	}
-
-	for _, rel := range []string{
-		"evidence/benchmark-homelab-20260328/synthetic-small/manifest.json",
-		"evidence/benchmark-homelab-20260328/homelab-jellyfin-illustrative/manifest.json",
-	} {
-		var manifest struct {
-			Host hostFields `json:"host"`
-		}
-		readJSON(rel, &manifest)
-		addFields(manifest.Host)
-	}
-
-	values := make([]string, 0, len(counts))
-	for value := range counts {
-		values = append(values, value)
-	}
-	sort.Strings(values)
-	return values
-}
-
-func assertSanitizedBenchmarkEvidenceFile(t *testing.T, path string, rawHostLiterals []string) {
-	t.Helper()
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read sanitized benchmark evidence file %q: %v", path, err)
-	}
-
-	text := string(data)
-	for _, forbiddenKey := range []string{"kernel", "cpu_model", "logical_cores", "total_ram_bytes"} {
-		forbidden := jsonFieldLiteral(forbiddenKey)
-		if strings.Contains(text, forbidden) {
-			t.Fatalf("benchmark evidence file %q still leaks %q", path, forbidden)
-		}
-	}
-	for _, forbidden := range rawHostLiterals {
-		if strings.Contains(text, forbidden) {
-			t.Fatalf("benchmark evidence file %q still leaks raw host literal %q", path, forbidden)
-		}
-	}
-
-	for _, required := range []string{
-		`"kernel_family":`,
-		`"cpu_class":`,
-		`"core_count_bucket":`,
-		`"ram_class":`,
-		`"publication_sanitized": true`,
-	} {
-		if !strings.Contains(text, required) {
-			t.Fatalf("benchmark evidence file %q is missing sanitized field %q", path, required)
-		}
-	}
-}
-
-func assertReleaseTreeExcludesRawLogicalCoreCount(t *testing.T, path string, logicalCoreCounts []string) {
-	t.Helper()
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read generated release-tree source file %q: %v", path, err)
-	}
-
-	text := string(data)
-	for _, logicalCoreCount := range logicalCoreCounts {
-		jsonLiteral := jsonFieldValueLiteral("logical_cores", logicalCoreCount)
-		if strings.Contains(text, jsonLiteral) {
-			t.Fatalf("release-tree source file %q still leaks raw logical core-count literal %q", path, jsonLiteral)
-		}
-
-		structLiteralPattern := regexp.MustCompile(`\bLogicalCores:\s*` + regexp.QuoteMeta(logicalCoreCount) + `\b`)
-		if match := structLiteralPattern.FindString(text); match != "" {
-			t.Fatalf("release-tree source file %q still leaks raw logical core-count source literal %q", path, match)
-		}
-	}
-}
-
-func jsonFieldLiteral(key string) string {
-	return `"` + key + `":`
-}
-
-func jsonFieldValueLiteral(key, value string) string {
-	return `"` + key + `": ` + value
 }

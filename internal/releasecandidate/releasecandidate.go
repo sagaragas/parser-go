@@ -12,8 +12,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/sagaragas/parser-go/internal/bench"
 )
 
 var excludedPrefixes = []string{
@@ -22,8 +20,10 @@ var excludedPrefixes = []string{
 	"benchmark/results/",
 	"build/",
 	"dist/",
+	"evidence/",
 	"temp/",
 	"tmp/",
+	"wiki/",
 	"work/",
 	"workspace/",
 }
@@ -39,6 +39,7 @@ var excludedPaths = map[string]struct{}{
 	"tmp":                    {},
 	"work":                   {},
 	"workspace":              {},
+	"internal/bench/evidence_committed_test.go": {},
 }
 
 const (
@@ -74,23 +75,16 @@ temp/
 .DS_Store
 Thumbs.db
 
-# Local workspace (contains job data)
+# Local workspace
 /work
 /workspace
 
-# Benchmark outputs (may contain sensitive data)
+# Benchmark runtime output
 /benchmark-output
 *.log
 !/benchmark/corpora/**/*.log
-
-# Benchmark results directory (runtime artifacts only)
 /benchmark/results/*
 !/benchmark/results/.gitignore
-
-# Evidence temp files
-/evidence/*.tmp
-/evidence/*.temp
-/evidence/*.log
 
 # Coverage
 *.cover
@@ -99,7 +93,7 @@ coverage.out
 # Go vendor (if used)
 /vendor
 
-# Local toolchains and compatibility environments
+# Local toolchains
 .factory/
 .tools/
 .venv/
@@ -118,29 +112,6 @@ type Manifest struct {
 	TreeRoot      string   `json:"tree_root"`
 }
 
-type publicRunManifest struct {
-	ScenarioID          string                       `json:"scenario_id"`
-	ScenarioDescription string                       `json:"scenario_description"`
-	Timestamp           time.Time                    `json:"timestamp"`
-	Corpus              bench.ManifestCorpus         `json:"corpus"`
-	Normalization       bench.ManifestNormalization  `json:"normalization"`
-	Host                publicHostSnapshot           `json:"host"`
-	Baseline            bench.ImplementationManifest `json:"baseline"`
-	Rewrite             bench.ImplementationManifest `json:"rewrite"`
-	Fairness            bench.FairnessReport         `json:"fairness"`
-}
-
-type publicHostSnapshot struct {
-	OS                   string `json:"os"`
-	Architecture         string `json:"architecture"`
-	KernelFamily         string `json:"kernel_family"`
-	CPUClass             string `json:"cpu_class"`
-	CoreCountBucket      string `json:"core_count_bucket"`
-	RAMClass             string `json:"ram_class"`
-	GoVersion            string `json:"go_version,omitempty"`
-	PythonVersion        string `json:"python_version,omitempty"`
-	PublicationSanitized bool   `json:"publication_sanitized"`
-}
 
 func Generate(repoRoot, outputDir string) (*Manifest, error) {
 	repoRoot, err := filepath.Abs(repoRoot)
@@ -314,156 +285,10 @@ func copyFile(rel, sourcePath, destPath string) error {
 	}
 	defer dest.Close()
 
-	transformed, shouldTransform, err := transformReleaseCandidateContents(rel, source)
-	if err != nil {
-		return fmt.Errorf("transform %s for public release: %w", rel, err)
-	}
-	if shouldTransform {
-		if _, err := dest.Write(transformed); err != nil {
-			return fmt.Errorf("write transformed %s to %s: %w", sourcePath, destPath, err)
-		}
-		return nil
-	}
-
 	if _, err := io.Copy(dest, source); err != nil {
 		return fmt.Errorf("copy %s to %s: %w", sourcePath, destPath, err)
 	}
 	return nil
-}
-
-func transformReleaseCandidateContents(rel string, source io.Reader) ([]byte, bool, error) {
-	switch {
-	case isBenchmarkEvidenceManifest(rel):
-		var manifest bench.RunManifest
-		if err := json.NewDecoder(source).Decode(&manifest); err != nil {
-			return nil, false, err
-		}
-		return marshalReleaseJSON(publicRunManifest{
-			ScenarioID:          manifest.ScenarioID,
-			ScenarioDescription: manifest.ScenarioDescription,
-			Timestamp:           manifest.Timestamp,
-			Corpus:              manifest.Corpus,
-			Normalization:       manifest.Normalization,
-			Host:                sanitizeHostSnapshot(manifest.Host),
-			Baseline:            manifest.Baseline,
-			Rewrite:             manifest.Rewrite,
-			Fairness:            manifest.Fairness,
-		})
-	case isBenchmarkEvidenceEnvironmentSnapshot(rel):
-		var host bench.HostSnapshot
-		if err := json.NewDecoder(source).Decode(&host); err != nil {
-			return nil, false, err
-		}
-		return marshalReleaseJSON(sanitizeHostSnapshot(host))
-	default:
-		return nil, false, nil
-	}
-}
-
-func isBenchmarkEvidenceManifest(rel string) bool {
-	return strings.HasPrefix(rel, "evidence/benchmark-") && strings.HasSuffix(rel, "/manifest.json")
-}
-
-func isBenchmarkEvidenceEnvironmentSnapshot(rel string) bool {
-	return strings.HasPrefix(rel, "evidence/benchmark-") && strings.HasSuffix(rel, "/environment/snapshot.json")
-}
-
-func sanitizeHostSnapshot(host bench.HostSnapshot) publicHostSnapshot {
-	return publicHostSnapshot{
-		OS:                   host.OS,
-		Architecture:         host.Architecture,
-		KernelFamily:         coarsenKernelFamily(host.OS, host.Kernel),
-		CPUClass:             coarsenCPUClass(host.Architecture),
-		CoreCountBucket:      coarsenCoreCount(host.LogicalCores),
-		RAMClass:             coarsenRAM(host.TotalRAMBytes),
-		GoVersion:            host.GoVersion,
-		PythonVersion:        host.PythonVersion,
-		PublicationSanitized: true,
-	}
-}
-
-func coarsenKernelFamily(osName, kernel string) string {
-	osName = strings.TrimSpace(osName)
-	major := leadingInteger(kernel)
-	if major != "" {
-		if osName == "" {
-			return major + ".x"
-		}
-		return osName + " " + major + ".x"
-	}
-	if osName != "" {
-		return osName + " (sanitized)"
-	}
-	return "sanitized"
-}
-
-func coarsenCPUClass(architecture string) string {
-	architecture = strings.TrimSpace(architecture)
-	if architecture == "" {
-		return "general-purpose CPU (sanitized)"
-	}
-	return architecture + " general-purpose CPU"
-}
-
-func coarsenCoreCount(logicalCores int) string {
-	switch {
-	case logicalCores <= 0:
-		return "unknown"
-	case logicalCores == 1:
-		return "1 logical core"
-	case logicalCores <= 4:
-		return "2-4 logical cores"
-	case logicalCores <= 8:
-		return "5-8 logical cores"
-	case logicalCores <= 16:
-		return "9-16 logical cores"
-	case logicalCores <= 32:
-		return "17-32 logical cores"
-	default:
-		return "33+ logical cores"
-	}
-}
-
-func coarsenRAM(totalRAMBytes uint64) string {
-	if totalRAMBytes == 0 {
-		return "unknown"
-	}
-
-	const gib = 1024 * 1024 * 1024
-	ramGiB := totalRAMBytes / gib
-	switch {
-	case ramGiB <= 8:
-		return "up to 8 GiB"
-	case ramGiB <= 16:
-		return "8-16 GiB"
-	case ramGiB <= 32:
-		return "16-32 GiB"
-	case ramGiB <= 64:
-		return "32-64 GiB"
-	case ramGiB <= 128:
-		return "64-128 GiB"
-	default:
-		return "128+ GiB"
-	}
-}
-
-func leadingInteger(value string) string {
-	var digits strings.Builder
-	for _, r := range strings.TrimSpace(value) {
-		if r < '0' || r > '9' {
-			break
-		}
-		digits.WriteRune(r)
-	}
-	return digits.String()
-}
-
-func marshalReleaseJSON(value any) ([]byte, bool, error) {
-	data, err := json.MarshalIndent(value, "", "  ")
-	if err != nil {
-		return nil, false, err
-	}
-	return append(data, '\n'), true, nil
 }
 
 func includesFile(paths []string, target string) bool {
