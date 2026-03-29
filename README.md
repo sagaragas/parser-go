@@ -94,7 +94,7 @@ cmd/bench/          Benchmark harness CLI
 internal/analysis/  Log parser and aggregation engine
 internal/api/       HTTP handlers
 internal/job/       Job lifecycle and storage
-internal/server/    HTTP server setup
+internal/server/    HTTP server type (minimal)
 internal/summary/   Summary types
 internal/bench/     Benchmark internals
 benchmark/          Scenario definitions and test corpora
