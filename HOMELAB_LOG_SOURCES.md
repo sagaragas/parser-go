@@ -2,6 +2,8 @@
 
 This file is the repo-local source of truth for choosing homelab-backed benchmark corpora. It is derived from `/root/ansible` plus the `homelab-reference` skill, and it exists so later benchmark workers do not need to rediscover where real-world log slices should come from.
 
+**Current parsergo benchmark constraint:** benchmark scenarios are parser-compatible only when the committed corpus is Apache/Nginx-style **combined log** input. The Go analysis engine currently accepts `format=combined` only, and the committed benchmark scenarios/evidence are wired to that format. Raw journal slices, Docker compose logs, JSON access logs, or app-specific request traces are therefore staging inputs only until they are sanitized and projected or normalized into combined-log lines.
+
 ## Source-of-truth inputs
 
 Use these files before changing this document:
@@ -25,12 +27,30 @@ Use inventory hostnames from those files in repo edits. Do not replace them with
 
 ## Hard rules for corpus collection
 
-1. **Prefer ingress-first capture.** Start with `caddy` unless there is a specific parser-coverage gap that requires an app-side fallback.
-2. **Keep raw capture outside git.** Write any unsanitized slice to `/tmp`, another throwaway path, or an ignored workspace outside `/root/parser-go`.
-3. **Sanitize before repo entry.** Only sanitized derivatives, hashes, manifests, and redaction reports may enter `benchmark/`, `evidence/`, or any commit.
-4. **Capture bounded windows.** Pull a fixed time window or explicit line range, not an open-ended log history.
-5. **Record provenance.** For every sanitized corpus, keep the source hostname, service name, capture window, route mix, corpus hash, and whether the slice is illustrative or representative in the benchmark metadata.
-6. **Treat this file as internal coordination material.** It may name internal hostnames and service placement from `/root/ansible`; later publication-facing surfaces must translate that into sanitized public wording instead of copying this file verbatim.
+1. **Benchmark only combined-log corpora.** Parsergo currently benchmarks `format=combined` only. A raw source is not benchmark-ready until it has been normalized into sanitized combined-log lines.
+2. **Prefer ingress-first capture.** Start with `caddy` unless there is a specific parser-coverage gap that requires an app-side fallback.
+3. **Keep raw capture outside git.** Write any unsanitized slice to `/tmp`, another throwaway path, or an ignored workspace outside `/root/parser-go`.
+4. **Sanitize before repo entry.** Only sanitized derivatives, hashes, manifests, and redaction reports may enter `benchmark/`, `evidence/`, or any commit.
+5. **Project non-native sources before benchmarking.** If the source does not already emit parser-compatible combined logs, redact it first and then project or normalize the surviving request data into sanitized combined-log input before writing a repo-managed corpus.
+6. **Capture bounded windows.** Pull a fixed time window or explicit line range, not an open-ended log history.
+7. **Record provenance.** For every sanitized corpus, keep the source hostname, service name, capture window, route mix, corpus hash, and whether the slice is illustrative or representative in the benchmark metadata.
+8. **Treat this file as internal coordination material.** It may name internal hostnames and service placement from `/root/ansible`; later publication-facing surfaces must translate that into sanitized public wording instead of copying this file verbatim.
+
+## Required projection workflow for non-native sources
+
+Use this path for any fallback source whose raw capture is not already combined-log input:
+
+1. Capture a bounded raw slice outside the repo.
+2. Remove or pseudonymize secrets and internal-only identifiers while keeping parser-relevant request structure.
+3. Project or normalize the sanitized request events into parser-compatible combined-log lines.
+4. Commit only the sanitized combined-log corpus plus its redaction/projection metadata and benchmark wiring.
+
+Follow the committed Jellyfin example instead of inventing a new layout:
+
+- `benchmark/corpora/homelab/jellyfin-illustrative/access.log` — sanitized combined-log corpus that parsergo can benchmark directly
+- `benchmark/corpora/homelab/jellyfin-illustrative/redaction-report.json` — records the anonymization steps, including `combined_log_projection`
+- `benchmark/scenarios/homelab-jellyfin-illustrative.json` — points the scenario at the sanitized corpus with `"format": "combined"`
+- `evidence/benchmark-homelab-20260328/homelab-jellyfin-illustrative/manifest.json` and `redaction/report.json` — publishable evidence copy showing the same corpus hash and projection path
 
 ## Approved sources
 
@@ -47,6 +67,7 @@ Use inventory hostnames from those files in repo edits. Do not replace them with
   ```
 
   Sanitize `/tmp/caddy-ingress.raw` immediately and only copy the sanitized derivative or its hash into repo-managed artifacts.
+- **Parser-compatible benchmark path:** Prefer a Caddy access-log export that is already close to combined format. If the captured sink is JSON or otherwise non-combined, treat it like any other raw source: sanitize it and project the surviving request records into combined-log lines before writing a benchmark corpus.
 - **Why this is the preferred dataset:** It is the broadest and most representative parser-coverage source in the homelab because it sees cross-service ingress, mixed status codes, bots plus browsers, redirect traffic, asset fetches, API calls, and real path/query variation through a single consistent collection point.
 - **Sanitization and publication constraints:** Remove or pseudonymize client IPs, cookies, authorization material, query-string secrets, referrer details, user-agent tokens, and internal-only host/path segments. Either drop or heavily redact requests hitting `adguard`, `unifi`, `pbs`, and `pve*` admin surfaces before anything publishable is produced.
 
@@ -61,6 +82,7 @@ Use inventory hostnames from those files in repo edits. Do not replace them with
   ansible arr -m shell -a "cd /opt/arr && docker compose logs --no-color --since '1h' sonarr radarr prowlarr seerr requestrr cleanuparr" > /tmp/arr-stack.raw
   ```
 
+- **Parser-compatible benchmark path:** Compose logs are fallback discovery material, not benchmark-ready input. After capture, extract the request slice you need, sanitize secrets and identifiers, and project the surviving request events into combined-log lines before creating a repo-managed corpus. Reuse the Jellyfin example paths above for the redaction report and scenario layout.
 - **Why this source is useful:** These logs are a good fallback when ingress slices are too thin for API-heavy paths, search/filter endpoints, or app-generated request shapes that later need dedicated parser coverage.
 - **Sanitization and publication constraints:** Strip API keys, usernames, media titles, download paths, webhook URLs, and any query parameters that encode identifiers or secrets. Do not commit container logs verbatim.
 
@@ -75,6 +97,7 @@ Use inventory hostnames from those files in repo edits. Do not replace them with
   ansible homepage -m shell -a "cd /opt/homepage && docker compose logs --no-color --since '1h' homepage" > /tmp/homepage.raw
   ```
 
+- **Parser-compatible benchmark path:** Homepage compose logs must follow the same raw capture -> sanitize -> combined-log projection path before they can back a parsergo benchmark corpus. Keep the raw file out of git and commit only the sanitized combined-log derivative plus its redaction metadata.
 - **Why this source is useful:** Useful for small, mostly-read-heavy request mixes: dashboard page loads, static assets, and widget-driven refresh traffic.
 - **Sanitization and publication constraints:** Redact any service labels, widget targets, environment-derived values, or internal-only URLs that may leak from dashboard configuration.
 
@@ -89,6 +112,7 @@ Use inventory hostnames from those files in repo edits. Do not replace them with
   ansible status -m shell -a "cd /opt/docker && docker compose logs --no-color --since '1h' uptime-kuma" > /tmp/status.raw
   ```
 
+- **Parser-compatible benchmark path:** Uptime Kuma compose logs are not native parser input. After capture, sanitize monitor names and endpoint details, then normalize the remaining HTTP request events into combined-log lines before any benchmark run or committed corpus.
 - **Why this source is useful:** Good for recurring health-check traffic, short request paths, redirects, and status-oriented UI/API activity that may not dominate the main ingress sample.
 - **Sanitization and publication constraints:** Remove monitor names, endpoint URLs, notification targets, and any incident text that could reveal internal topology or service naming.
 
@@ -103,6 +127,7 @@ Use inventory hostnames from those files in repo edits. Do not replace them with
   ansible speedtest -m shell -a "cd /opt/speedtest && docker compose logs --no-color --since '1h' speedtest-tracker" > /tmp/speedtest.raw
   ```
 
+- **Parser-compatible benchmark path:** Treat the raw speedtest tracker logs as source material only. Sanitize account and endpoint details first, then project the request slice into combined-log lines before creating a benchmark corpus or scenario.
 - **Why this source is useful:** Adds a smaller but distinct mix of UI requests, scheduled-job traffic, and measurement endpoints that can broaden parser coverage beyond generic dashboards.
 - **Sanitization and publication constraints:** Redact account identifiers, schedule metadata, server-selection details, and any captured external endpoint names before producing a sanitized corpus.
 
@@ -117,6 +142,7 @@ Use inventory hostnames from those files in repo edits. Do not replace them with
   ansible scrutiny -m shell -a "cd /opt/docker && docker compose logs --no-color --since '1h' scrutiny-web" > /tmp/scrutiny.raw
   ```
 
+- **Parser-compatible benchmark path:** The raw `scrutiny-web` logs must be sanitized and then rewritten into combined-log lines before they are benchmarkable. Keep the projected corpus small and bounded, and store its transformation details in a committed redaction report beside the corpus.
 - **Why this source is useful:** Useful for admin-style UI traffic with predictable but different paths from the media and dashboard services, especially when the benchmark needs another non-media fallback behind `caddy`.
 - **Sanitization and publication constraints:** Remove disk identifiers, host labels, SMART metadata, and any device naming that could reveal physical inventory.
 
@@ -132,6 +158,7 @@ Use inventory hostnames from those files in repo edits. Do not replace them with
   ansible plex -m shell -a "journalctl -u tautulli --since '1h' --no-pager" > /tmp/tautulli.raw
   ```
 
+- **Parser-compatible benchmark path:** These native app logs usually need the same projection flow the committed Jellyfin example already demonstrates: sanitize client identifiers and media/session tokens, then emit a bounded combined-log derivative such as `benchmark/corpora/homelab/jellyfin-illustrative/access.log` before benchmarking.
 - **Why this source is useful:** Use these only when the benchmark needs media-oriented request shapes such as long paths, artwork fetches, or range-request-heavy browsing behavior that is underrepresented in the primary ingress slice.
 - **Sanitization and publication constraints:** Remove media titles, library paths, device names, usernames, session identifiers, and any playback metadata. `tautulli` is the preferred `plex`-side fallback because it is the Caddy-backed surface named in source of truth; do not assume the main Plex service is part of the same ingress path.
 
