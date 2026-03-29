@@ -298,6 +298,7 @@ type EvidenceScenarioEntry struct {
 	BundlePath         string    `json:"bundle_path"`
 	ParityPassed       bool      `json:"parity_passed"`
 	CorpusSHA256       string    `json:"corpus_sha256"`
+	RewriteGitRevision string    `json:"rewrite_git_revision,omitempty"`
 	CaptureWindow      string    `json:"capture_window,omitempty"`
 	TrafficMixSummary  string    `json:"traffic_mix_summary,omitempty"`
 	HasRedactionReport bool      `json:"has_redaction_report"`
@@ -306,10 +307,11 @@ type EvidenceScenarioEntry struct {
 
 // BundleValidationReport records publishable-bundle validation results.
 type BundleValidationReport struct {
-	Passed           bool             `json:"passed"`
-	RequiredMembers  []string         `json:"required_members"`
-	MissingMembers   []string         `json:"missing_members,omitempty"`
-	ForbiddenMatches []ForbiddenMatch `json:"forbidden_matches,omitempty"`
+	RewriteGitRevision string           `json:"rewrite_git_revision,omitempty"`
+	Passed             bool             `json:"passed"`
+	RequiredMembers    []string         `json:"required_members"`
+	MissingMembers     []string         `json:"missing_members,omitempty"`
+	ForbiddenMatches   []ForbiddenMatch `json:"forbidden_matches,omitempty"`
 }
 
 // ForbiddenMatch describes one forbidden marker found in a publishable bundle.
@@ -330,6 +332,7 @@ type RedactionScanReport struct {
 type CrossCheckReport struct {
 	ScenarioID            string               `json:"scenario_id"`
 	CorpusSHA256          string               `json:"corpus_sha256"`
+	RewriteGitRevision    string               `json:"rewrite_git_revision,omitempty"`
 	JobID                 string               `json:"job_id"`
 	SubmissionLocation    string               `json:"submission_location"`
 	ReportURL             string               `json:"report_url"`

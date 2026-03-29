@@ -1,7 +1,9 @@
 {
+  "rewrite_git_revision": "4dee015889ba48926a682468c8a2f446dc4d1496",
   "passed": true,
   "required_members": [
     "manifest.json",
+    "fairness.json",
     "baseline/normalized-summary.json",
     "baseline/workload.json",
     "baseline/metrics.json",
@@ -12,6 +14,7 @@
     "parity/aggregate-summary.json",
     "environment/snapshot.json",
     "redaction/report.json",
-    "redaction/scan.json"
+    "redaction/scan.json",
+    "service-integration/cross-check.json"
   ]
 }

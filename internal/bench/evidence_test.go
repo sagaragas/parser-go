@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -299,6 +300,257 @@ func TestBundleValidationRejectsForbiddenMarkers(t *testing.T) {
 	}
 	if len(report.ForbiddenMatches) == 0 {
 		t.Fatalf("expected forbidden matches, got %+v", report)
+	}
+}
+
+func TestScanForbiddenMarkersDetectsVALBENCH005LeakClasses(t *testing.T) {
+	t.Parallel()
+
+	contents := strings.Join([]string{
+		`GET /stream?token=super-secret`,
+		`referrer=https://example.invalid/watch?session_id=abc123`,
+		`user-agent=JellyfinMediaPlayer/10.8.0`,
+		`cookie=session=abc123`,
+		`authorization=Bearer secret-token`,
+		`path=/var/lib/jellyfin/config/system.xml`,
+		`host=sonarr.ragas.lcl`,
+	}, "\n")
+
+	matches := scanForbiddenMarkers(contents)
+	found := make(map[string]bool, len(matches))
+	for _, match := range matches {
+		found[match.Pattern] = true
+	}
+
+	for _, pattern := range []string{
+		"query_string_secret",
+		"referrer_secret",
+		"user_agent_token",
+		"cookie_header",
+		"authorization_header",
+		"private_filesystem_path",
+		"internal_identifier",
+	} {
+		if !found[pattern] {
+			t.Fatalf("expected pattern %q to be detected, got %+v", pattern, matches)
+		}
+	}
+}
+
+func TestPublishEvidenceSetSanitizesCrossCheckAndPropagatesRewriteRevision(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	corpusPath := filepath.Join(tempDir, "access.log")
+	corpus := []byte(
+		"198.51.100.24 - - [27/Mar/2026:22:35:03 -0700] \"GET /videos/session-a/live.m3u8 HTTP/1.1\" 404 0\n" +
+			"198.51.100.24 - - [27/Mar/2026:22:35:04 -0700] \"GET /videos/session-a/live.m3u8 HTTP/1.1\" 404 0\n" +
+			"198.51.100.25 - - [27/Mar/2026:22:35:05 -0700] \"GET /videos/session-b/live.m3u8 HTTP/1.1\" 404 0\n")
+	if err := os.WriteFile(corpusPath, corpus, 0o644); err != nil {
+		t.Fatalf("write corpus: %v", err)
+	}
+
+	normalizationPath := filepath.Join(tempDir, "normalization.json")
+	if err := os.WriteFile(normalizationPath, []byte(`{"id":"canonical-summary-v1"}`), 0o644); err != nil {
+		t.Fatalf("write normalization: %v", err)
+	}
+
+	redactionReportPath := filepath.Join(tempDir, "redaction-report.json")
+	if err := os.WriteFile(redactionReportPath, []byte(`{
+  "source_kind": "jellyfin-request-errors",
+  "capture_window": "2026-03-27T22:35:03-07:00/2026-03-27T22:35:05-07:00",
+  "line_count_before": 3,
+  "line_count_after": 3,
+  "transformations": [
+    {"kind": "path_token_pseudonymized", "count": 3}
+  ],
+  "forbidden_matches": []
+}`), 0o644); err != nil {
+		t.Fatalf("write redaction report: %v", err)
+	}
+
+	output, err := AnalyzeCorpus(corpusPath, "combined", "default")
+	if err != nil {
+		t.Fatalf("analyze corpus: %v", err)
+	}
+	corpusHash, err := sha256File(corpusPath)
+	if err != nil {
+		t.Fatalf("hash corpus: %v", err)
+	}
+	normalizationHash, err := sha256File(normalizationPath)
+	if err != nil {
+		t.Fatalf("hash normalization: %v", err)
+	}
+
+	logger := slog.New(slog.NewJSONHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
+	store := job.NewStore()
+	analysisHandler := api.NewHandler(api.HandlerConfig{
+		Logger:       logger,
+		JobStore:     store,
+		MaxInputSize: 1 << 20,
+	})
+	analysisHandler.SetReady(true)
+	reportHandler := api.NewReportHandler(analysisHandler, logger)
+	mux := http.NewServeMux()
+	analysisHandler.RegisterRoutes(mux)
+	reportHandler.RegisterRoutes(mux)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	rewriteRevision := "rewrite-revision-1234567"
+	manifest := RunManifest{
+		ScenarioID:          "homelab-illustrative",
+		ScenarioDescription: "homelab publishable evidence traceability test",
+		Timestamp:           time.Date(2026, 3, 28, 23, 35, 0, 0, time.UTC),
+		Corpus: ManifestCorpus{
+			ID:      "homelab-illustrative-v1",
+			Path:    corpusPath,
+			SHA256:  corpusHash,
+			Bytes:   int64(len(corpus)),
+			Format:  "combined",
+			Profile: "default",
+		},
+		Normalization: ManifestNormalization{
+			ID:     "canonical-summary-v1",
+			Path:   normalizationPath,
+			SHA256: normalizationHash,
+		},
+		Host: HostSnapshot{
+			OS:            "linux",
+			Architecture:  "amd64",
+			Kernel:        "6.17.13-1-pve",
+			CPUModel:      "12th Gen Intel(R) Core(TM) i5-12500T",
+			LogicalCores:  12,
+			TotalRAMBytes: 41943040000,
+			GoVersion:     "go version go1.26.0 linux/amd64",
+			PythonVersion: "Python 3.11.2",
+		},
+		Baseline: ImplementationManifest{
+			Name:        "legacy-python",
+			Command:     []string{filepath.Join(tempDir, ".venv", "bin", "python"), filepath.Join(tempDir, "benchmark", "support", "legacy_baseline_adapter.py"), "--legacy-repo", "/root/web-log-parser", "--corpus", corpusPath, "--out", filepath.Join(tempDir, "workspace", "baseline", "output.json")},
+			WorkingDir:  filepath.Join(tempDir, "workspace", "baseline"),
+			Version:     "Python 3.11.2",
+			GitRevision: "904f838ddce5defc8715f2e444063520b7b0d612",
+		},
+		Rewrite: ImplementationManifest{
+			Name:        "parsergo-rewrite",
+			Command:     []string{filepath.Join(tempDir, ".factory", "bin", "go"), "run", "./cmd/bench", "impl", "rewrite", "--corpus", corpusPath, "--out", filepath.Join(tempDir, "workspace", "rewrite", "output.json"), "--format", "combined", "--profile", "default"},
+			WorkingDir:  tempDir,
+			Version:     "go version go1.26.0 linux/amd64",
+			GitRevision: rewriteRevision,
+		},
+		Fairness: FairnessReport{
+			RequiredControls: []string{"warmup_iterations", "measured_iterations", "cache_posture", "concurrency", "max_procs"},
+			Symmetric:        true,
+			Claimable:        true,
+		},
+	}
+
+	prepared := &preparedScenario{
+		repoRoot:   tempDir,
+		corpusPath: corpusPath,
+		scenario: Scenario{
+			ID:   "homelab-illustrative",
+			Kind: "homelab",
+			Corpus: CorpusSpec{
+				ID:      "homelab-illustrative-v1",
+				Path:    corpusPath,
+				Format:  "combined",
+				Profile: "default",
+			},
+			Evidence: EvidenceSpec{
+				Representation:      "illustrative",
+				CaptureWindow:       "2026-03-27T22:35:03-07:00/2026-03-27T22:35:05-07:00",
+				TrafficMixSummary:   "Two anonymized Jellyfin retry paths from a bounded homelab capture window.",
+				RedactionReportPath: redactionReportPath,
+			},
+		},
+		placeholderContext: map[string]string{
+			"baseline_python": filepath.Join(tempDir, ".venv", "bin", "python"),
+			"go_binary":       filepath.Join(tempDir, ".factory", "bin", "go"),
+			"repo_root":       tempDir,
+		},
+	}
+
+	evidenceDir := filepath.Join(tempDir, "evidence")
+	published, err := publishEvidenceSet(context.Background(), prepared, manifest, manifest.Fairness, executionResult{
+		output: &output,
+	}, executionResult{
+		output: &output,
+	}, ParityReport{
+		Passed:                   true,
+		PerformanceClaimsAllowed: true,
+	}, AggregateMetrics{
+		Implementations: map[string]ImplementationAggregate{
+			"baseline": {MeasuredIterations: 1, SuccessfulSamples: 1},
+			"rewrite":  {MeasuredIterations: 1, SuccessfulSamples: 1},
+		},
+	}, RunOptions{
+		EvidenceSetDir: evidenceDir,
+		ServiceBaseURL: server.URL,
+	})
+	if err != nil {
+		t.Fatalf("publish evidence: %v", err)
+	}
+
+	crossCheckData, err := os.ReadFile(filepath.Join(published.BundleDir, "service-integration", "cross-check.json"))
+	if err != nil {
+		t.Fatalf("read cross-check: %v", err)
+	}
+	var crossCheck CrossCheckReport
+	if err := json.Unmarshal(crossCheckData, &crossCheck); err != nil {
+		t.Fatalf("decode cross-check: %v", err)
+	}
+	if crossCheck.RewriteGitRevision != rewriteRevision {
+		t.Fatalf("expected cross-check rewrite revision %q, got %q", rewriteRevision, crossCheck.RewriteGitRevision)
+	}
+	if got, want := crossCheck.ReportURL, "/reports/"+crossCheck.JobID; got != want {
+		t.Fatalf("expected sanitized report URL %q, got %q", want, got)
+	}
+	if got, want := crossCheck.SubmissionLocation, "/v1/analyses/"+crossCheck.JobID; got != want {
+		t.Fatalf("expected submission location %q, got %q", want, got)
+	}
+
+	validationData, err := os.ReadFile(filepath.Join(published.BundleDir, "bundle-validation.json"))
+	if err != nil {
+		t.Fatalf("read validation report: %v", err)
+	}
+	var validation BundleValidationReport
+	if err := json.Unmarshal(validationData, &validation); err != nil {
+		t.Fatalf("decode validation report: %v", err)
+	}
+	if !validation.Passed {
+		t.Fatalf("expected validation to pass, got %+v", validation)
+	}
+	if validation.RewriteGitRevision != rewriteRevision {
+		t.Fatalf("expected validation rewrite revision %q, got %q", rewriteRevision, validation.RewriteGitRevision)
+	}
+	for _, required := range []string{"fairness.json", "service-integration/cross-check.json"} {
+		var found bool
+		for _, member := range validation.RequiredMembers {
+			if member == required {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected required member %q in %+v", required, validation.RequiredMembers)
+		}
+	}
+
+	indexData, err := os.ReadFile(published.IndexPath)
+	if err != nil {
+		t.Fatalf("read evidence index: %v", err)
+	}
+	var index EvidenceIndex
+	if err := json.Unmarshal(indexData, &index); err != nil {
+		t.Fatalf("decode evidence index: %v", err)
+	}
+	if len(index.Scenarios) != 1 {
+		t.Fatalf("expected 1 scenario in index, got %d", len(index.Scenarios))
+	}
+	if index.Scenarios[0].RewriteGitRevision != rewriteRevision {
+		t.Fatalf("expected index rewrite revision %q, got %q", rewriteRevision, index.Scenarios[0].RewriteGitRevision)
 	}
 }
 

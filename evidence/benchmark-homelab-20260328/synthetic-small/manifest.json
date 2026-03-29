@@ -1,7 +1,7 @@
 {
   "scenario_id": "synthetic-small",
   "scenario_description": "Synthetic combined-log parity scenario with one malformed line and one filtered health check.",
-  "timestamp": "2026-03-28T23:35:02.222234192Z",
+  "timestamp": "2026-03-29T00:08:16.198858034Z",
   "corpus": {
     "id": "synthetic-small-v1",
     "path": "\u003crepo-root\u003e/benchmark/corpora/synthetic/small/access.log",
@@ -66,7 +66,7 @@
     ],
     "working_dir": "\u003crepo-root\u003e",
     "version": "go version go1.26.0 linux/amd64",
-    "git_revision": "e06cfc004661d172216093ad79912e2b151b39b1",
+    "git_revision": "4dee015889ba48926a682468c8a2f446dc4d1496",
     "controls": {
       "warmup_iterations": 1,
       "measured_iterations": 2,
@@ -84,6 +84,144 @@
       "max_procs"
     ],
     "symmetric": true,
-    "differences": []
+    "differences": [],
+    "claimable": true,
+    "control_evidence": [
+      {
+        "control": "warmup_iterations",
+        "baseline": {
+          "declared": "1",
+          "applied": "enforced",
+          "verified": true,
+          "details": [
+            "observed 1 warmup_iteration iteration(s)"
+          ]
+        },
+        "rewrite": {
+          "declared": "1",
+          "applied": "enforced",
+          "verified": true,
+          "details": [
+            "observed 1 warmup_iteration iteration(s)"
+          ]
+        },
+        "symmetric": true,
+        "claimable": true
+      },
+      {
+        "control": "measured_iterations",
+        "baseline": {
+          "declared": "2",
+          "applied": "enforced",
+          "verified": true,
+          "details": [
+            "observed 2 measured_iteration iteration(s)"
+          ]
+        },
+        "rewrite": {
+          "declared": "2",
+          "applied": "enforced",
+          "verified": true,
+          "details": [
+            "observed 2 measured_iteration iteration(s)"
+          ]
+        },
+        "symmetric": true,
+        "claimable": true
+      },
+      {
+        "control": "cache_posture",
+        "baseline": {
+          "declared": "cold",
+          "applied": "drop_file_cache",
+          "verified": true,
+          "details": [
+            "dropped corpus file cache before timed command"
+          ]
+        },
+        "rewrite": {
+          "declared": "cold",
+          "applied": "drop_file_cache",
+          "verified": true,
+          "details": [
+            "dropped corpus file cache before timed command"
+          ]
+        },
+        "symmetric": true,
+        "claimable": true
+      },
+      {
+        "control": "concurrency",
+        "baseline": {
+          "declared": "1",
+          "applied": "serialized:1",
+          "verified": true,
+          "details": [
+            "serialized paired execution recorded for round 1",
+            "serialized paired execution recorded for round 2",
+            "serialized paired execution recorded for round 3"
+          ]
+        },
+        "rewrite": {
+          "declared": "1",
+          "applied": "serialized:1",
+          "verified": true,
+          "details": [
+            "serialized paired execution recorded for round 1",
+            "serialized paired execution recorded for round 2",
+            "serialized paired execution recorded for round 3"
+          ]
+        },
+        "symmetric": true,
+        "claimable": true
+      },
+      {
+        "control": "max_procs",
+        "baseline": {
+          "declared": "1",
+          "applied": "taskset:0",
+          "verified": true,
+          "details": [
+            "taskset constrained process to cpu set 0"
+          ]
+        },
+        "rewrite": {
+          "declared": "1",
+          "applied": "taskset:0",
+          "verified": true,
+          "details": [
+            "taskset constrained process to cpu set 0"
+          ]
+        },
+        "symmetric": true,
+        "claimable": true
+      }
+    ],
+    "execution_schedule": [
+      {
+        "round": 1,
+        "phase": "warmup",
+        "order": [
+          "baseline",
+          "rewrite"
+        ]
+      },
+      {
+        "round": 2,
+        "phase": "measured",
+        "order": [
+          "rewrite",
+          "baseline"
+        ]
+      },
+      {
+        "round": 3,
+        "phase": "measured",
+        "order": [
+          "baseline",
+          "rewrite"
+        ]
+      }
+    ]
   }
 }

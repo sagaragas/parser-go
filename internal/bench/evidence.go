@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -122,6 +123,7 @@ func publishEvidenceSet(ctx context.Context, prepared *preparedScenario, manifes
 		if err != nil {
 			return publishedEvidence{}, err
 		}
+		crossCheck = sanitizeCrossCheckForPublication(crossCheck, sanitizedManifest.Rewrite.GitRevision)
 		crossCheckPath = filepath.Join(bundleDir, "service-integration", "cross-check.json")
 		if err := writeJSONFile(crossCheckPath, crossCheck); err != nil {
 			return publishedEvidence{}, err
@@ -132,6 +134,7 @@ func publishEvidenceSet(ctx context.Context, prepared *preparedScenario, manifes
 	if err != nil {
 		return publishedEvidence{}, err
 	}
+	validation.RewriteGitRevision = sanitizedManifest.Rewrite.GitRevision
 	if err := writeJSONFile(filepath.Join(bundleDir, "bundle-validation.json"), validation); err != nil {
 		return publishedEvidence{}, err
 	}
@@ -147,6 +150,7 @@ func publishEvidenceSet(ctx context.Context, prepared *preparedScenario, manifes
 		BundlePath:         filepath.Base(bundleDir),
 		ParityPassed:       parity.Passed,
 		CorpusSHA256:       manifest.Corpus.SHA256,
+		RewriteGitRevision: sanitizedManifest.Rewrite.GitRevision,
 		CaptureWindow:      prepared.scenario.Evidence.CaptureWindow,
 		TrafficMixSummary:  prepared.scenario.Evidence.TrafficMixSummary,
 		HasRedactionReport: hasRedaction,
@@ -178,6 +182,14 @@ func sanitizeManifestForPublication(manifest RunManifest, prepared *preparedScen
 	sanitized.Rewrite.Command = sanitizePublishableCommand(manifest.Rewrite.Command, prepared)
 	sanitized.Baseline.WorkingDir = sanitizePublishablePath(manifest.Baseline.WorkingDir, prepared)
 	sanitized.Rewrite.WorkingDir = sanitizePublishablePath(manifest.Rewrite.WorkingDir, prepared)
+	return sanitized
+}
+
+func sanitizeCrossCheckForPublication(report CrossCheckReport, rewriteGitRevision string) CrossCheckReport {
+	sanitized := report
+	sanitized.RewriteGitRevision = rewriteGitRevision
+	sanitized.SubmissionLocation = sanitizeServiceLocation(report.SubmissionLocation)
+	sanitized.ReportURL = sanitizeServiceLocation(report.ReportURL)
 	return sanitized
 }
 
@@ -216,6 +228,23 @@ func sanitizePublishablePath(value string, prepared *preparedScenario) string {
 	return sanitized
 }
 
+func sanitizeServiceLocation(value string) string {
+	if value == "" {
+		return ""
+	}
+	if strings.HasPrefix(value, "/") {
+		return value
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Path == "" {
+		return value
+	}
+	if parsed.RawQuery != "" {
+		return parsed.Path + "?" + parsed.RawQuery
+	}
+	return parsed.Path
+}
+
 func validateBundleForPublication(bundleDir string) (BundleValidationReport, error) {
 	required := []string{
 		"manifest.json",
@@ -233,6 +262,9 @@ func validateBundleForPublication(bundleDir string) (BundleValidationReport, err
 
 	if _, err := os.Stat(filepath.Join(bundleDir, "redaction")); err == nil {
 		required = append(required, "redaction/report.json", "redaction/scan.json")
+	}
+	if _, err := os.Stat(filepath.Join(bundleDir, "service-integration")); err == nil {
+		required = append(required, "service-integration/cross-check.json")
 	}
 
 	report := BundleValidationReport{
@@ -296,10 +328,14 @@ func scanForbiddenMarkers(contents string) []ForbiddenMatch {
 	}{
 		{name: "absolute_repo_path", re: regexp.MustCompile(`/root/[^\s"']+`)},
 		{name: "temporary_path", re: regexp.MustCompile(`/tmp/[^\s"']*`)},
+		{name: "private_filesystem_path", re: regexp.MustCompile(`/(?:home|mnt|media|srv|var|opt|etc)/[^\s"'<>]+`)},
 		{name: "private_ipv4", re: regexp.MustCompile(`\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})\b`)},
-		{name: "cookie_header", re: regexp.MustCompile(`(?i)\bcookie\b`)},
-		{name: "authorization_header", re: regexp.MustCompile(`(?i)\bauthorization\b`)},
-		{name: "internal_search_domain", re: regexp.MustCompile(`(?i)ragas\.lcl`)},
+		{name: "query_string_secret", re: regexp.MustCompile(`(?i)[?&](?:access(?:_|-)?token|api(?:_|-)?key|auth(?:orization)?|jwt|password|passwd|secret|session(?:_|-)?id|sig(?:nature)?|token)=[^&\s"'<>]+`)},
+		{name: "referrer_secret", re: regexp.MustCompile(`(?i)\b(?:referer|referrer)\b[^,\n]*[:=]\s*(?:https?://)?[^\s"'<>]+\?[^\s"'<>]+`)},
+		{name: "user_agent_token", re: regexp.MustCompile(`(?i)\b(?:user-agent|user_agent)\b[^,\n]*[:=]\s*(?:"[^"]+"|[^\s,][^\n]*)`)},
+		{name: "cookie_header", re: regexp.MustCompile(`(?i)\bcookie\b[^,\n]*[:=]\s*(?:"[^"]+"|[^\s,][^\n]*)`)},
+		{name: "authorization_header", re: regexp.MustCompile(`(?i)\bauthorization\b[^,\n]*[:=]\s*(?:"[^"]+"|[^\s,][^\n]*)`)},
+		{name: "internal_identifier", re: regexp.MustCompile(`(?i)\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:lcl|local|internal)\b`)},
 	}
 
 	var matches []ForbiddenMatch

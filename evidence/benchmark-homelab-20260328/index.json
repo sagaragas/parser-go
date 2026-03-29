@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-03-28T23:35:27.132028055Z",
+  "generated_at": "2026-03-29T00:08:22.05389731Z",
   "scenarios": [
     {
       "scenario_id": "homelab-jellyfin-illustrative",
@@ -8,10 +8,11 @@
       "bundle_path": "homelab-jellyfin-illustrative",
       "parity_passed": true,
       "corpus_sha256": "27d75747c984391a52fba754c8f9bde1cc83cb6626d6832236fbd5378c0a9a87",
+      "rewrite_git_revision": "4dee015889ba48926a682468c8a2f446dc4d1496",
       "capture_window": "2026-03-27T22:35:03-07:00/2026-03-27T22:41:23-07:00",
       "traffic_mix_summary": "Two anonymized Jellyfin live-stream retry paths from a bounded homelab capture window with repeated 404 responses.",
       "has_redaction_report": true,
-      "updated_at": "2026-03-28T23:35:27.132028055Z"
+      "updated_at": "2026-03-29T00:08:22.05389731Z"
     },
     {
       "scenario_id": "synthetic-small",
@@ -20,10 +21,11 @@
       "bundle_path": "synthetic-small",
       "parity_passed": true,
       "corpus_sha256": "cfb8103d89c4bb1cb69732e643177357e3bae1faf0a9cd304c2fb4966e52540d",
+      "rewrite_git_revision": "4dee015889ba48926a682468c8a2f446dc4d1496",
       "capture_window": "synthetic-fixture",
       "traffic_mix_summary": "Small mixed fixture with one filtered health check, one malformed line, and two ranked request rows.",
       "has_redaction_report": false,
-      "updated_at": "2026-03-28T23:35:03.05417377Z"
+      "updated_at": "2026-03-29T00:08:16.203320835Z"
     }
   ]
 }

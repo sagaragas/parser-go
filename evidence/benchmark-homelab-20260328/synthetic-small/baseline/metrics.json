@@ -4,32 +4,107 @@
     "phase": "warmup",
     "iteration": 1,
     "status": "succeeded",
-    "started_at": "2026-03-28T23:35:02.222405813Z",
-    "finished_at": "2026-03-28T23:35:02.456105801Z",
-    "wall_ms": 233.699209,
-    "cpu_ms": 1632.531,
-    "max_rss_kb": 45760
+    "started_at": "2026-03-29T00:08:15.504553616Z",
+    "finished_at": "2026-03-29T00:08:15.653630802Z",
+    "wall_ms": 149.06822,
+    "cpu_ms": 148.709,
+    "max_rss_kb": 45960,
+    "fairness": {
+      "round": 1,
+      "position_in_round": 1,
+      "order": [
+        "baseline",
+        "rewrite"
+      ],
+      "cache_posture": "cold",
+      "cache_action": "drop_file_cache",
+      "cache_verified": true,
+      "cache_details": [
+        "dropped corpus file cache before timed command"
+      ],
+      "concurrency": 1,
+      "concurrency_verified": true,
+      "concurrency_details": [
+        "serialized paired execution recorded for round 1"
+      ],
+      "max_procs": 1,
+      "max_procs_verified": true,
+      "cpu_set": "0",
+      "max_procs_details": [
+        "taskset constrained process to cpu set 0"
+      ]
+    }
   },
   {
     "implementation": "baseline",
     "phase": "measured",
     "iteration": 2,
     "status": "succeeded",
-    "started_at": "2026-03-28T23:35:02.456345629Z",
-    "finished_at": "2026-03-28T23:35:02.693133964Z",
-    "wall_ms": 236.780604,
-    "cpu_ms": 1591.748,
-    "max_rss_kb": 46168
+    "started_at": "2026-03-29T00:08:15.800533067Z",
+    "finished_at": "2026-03-29T00:08:15.947997513Z",
+    "wall_ms": 147.45494300000001,
+    "cpu_ms": 147.10799999999998,
+    "max_rss_kb": 45972,
+    "fairness": {
+      "round": 2,
+      "position_in_round": 2,
+      "order": [
+        "rewrite",
+        "baseline"
+      ],
+      "cache_posture": "cold",
+      "cache_action": "drop_file_cache",
+      "cache_verified": true,
+      "cache_details": [
+        "dropped corpus file cache before timed command"
+      ],
+      "concurrency": 1,
+      "concurrency_verified": true,
+      "concurrency_details": [
+        "serialized paired execution recorded for round 2"
+      ],
+      "max_procs": 1,
+      "max_procs_verified": true,
+      "cpu_set": "0",
+      "max_procs_details": [
+        "taskset constrained process to cpu set 0"
+      ]
+    }
   },
   {
     "implementation": "baseline",
     "phase": "measured",
     "iteration": 3,
     "status": "succeeded",
-    "started_at": "2026-03-28T23:35:02.693284218Z",
-    "finished_at": "2026-03-28T23:35:02.936884464Z",
-    "wall_ms": 243.599232,
-    "cpu_ms": 1635.5010000000002,
-    "max_rss_kb": 46132
+    "started_at": "2026-03-29T00:08:15.958711415Z",
+    "finished_at": "2026-03-29T00:08:16.111853528Z",
+    "wall_ms": 153.132444,
+    "cpu_ms": 152.64600000000002,
+    "max_rss_kb": 46008,
+    "fairness": {
+      "round": 3,
+      "position_in_round": 1,
+      "order": [
+        "baseline",
+        "rewrite"
+      ],
+      "cache_posture": "cold",
+      "cache_action": "drop_file_cache",
+      "cache_verified": true,
+      "cache_details": [
+        "dropped corpus file cache before timed command"
+      ],
+      "concurrency": 1,
+      "concurrency_verified": true,
+      "concurrency_details": [
+        "serialized paired execution recorded for round 3"
+      ],
+      "max_procs": 1,
+      "max_procs_verified": true,
+      "cpu_set": "0",
+      "max_procs_details": [
+        "taskset constrained process to cpu set 0"
+      ]
+    }
   }
 ]

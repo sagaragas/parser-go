@@ -1,0 +1,149 @@
+{
+  "required_controls": [
+    "warmup_iterations",
+    "measured_iterations",
+    "cache_posture",
+    "concurrency",
+    "max_procs"
+  ],
+  "symmetric": true,
+  "differences": [],
+  "claimable": true,
+  "control_evidence": [
+    {
+      "control": "warmup_iterations",
+      "baseline": {
+        "declared": "1",
+        "applied": "enforced",
+        "verified": true,
+        "details": [
+          "observed 1 warmup_iteration iteration(s)"
+        ]
+      },
+      "rewrite": {
+        "declared": "1",
+        "applied": "enforced",
+        "verified": true,
+        "details": [
+          "observed 1 warmup_iteration iteration(s)"
+        ]
+      },
+      "symmetric": true,
+      "claimable": true
+    },
+    {
+      "control": "measured_iterations",
+      "baseline": {
+        "declared": "2",
+        "applied": "enforced",
+        "verified": true,
+        "details": [
+          "observed 2 measured_iteration iteration(s)"
+        ]
+      },
+      "rewrite": {
+        "declared": "2",
+        "applied": "enforced",
+        "verified": true,
+        "details": [
+          "observed 2 measured_iteration iteration(s)"
+        ]
+      },
+      "symmetric": true,
+      "claimable": true
+    },
+    {
+      "control": "cache_posture",
+      "baseline": {
+        "declared": "cold",
+        "applied": "drop_file_cache",
+        "verified": true,
+        "details": [
+          "dropped corpus file cache before timed command"
+        ]
+      },
+      "rewrite": {
+        "declared": "cold",
+        "applied": "drop_file_cache",
+        "verified": true,
+        "details": [
+          "dropped corpus file cache before timed command"
+        ]
+      },
+      "symmetric": true,
+      "claimable": true
+    },
+    {
+      "control": "concurrency",
+      "baseline": {
+        "declared": "1",
+        "applied": "serialized:1",
+        "verified": true,
+        "details": [
+          "serialized paired execution recorded for round 1",
+          "serialized paired execution recorded for round 2",
+          "serialized paired execution recorded for round 3"
+        ]
+      },
+      "rewrite": {
+        "declared": "1",
+        "applied": "serialized:1",
+        "verified": true,
+        "details": [
+          "serialized paired execution recorded for round 1",
+          "serialized paired execution recorded for round 2",
+          "serialized paired execution recorded for round 3"
+        ]
+      },
+      "symmetric": true,
+      "claimable": true
+    },
+    {
+      "control": "max_procs",
+      "baseline": {
+        "declared": "1",
+        "applied": "taskset:0",
+        "verified": true,
+        "details": [
+          "taskset constrained process to cpu set 0"
+        ]
+      },
+      "rewrite": {
+        "declared": "1",
+        "applied": "taskset:0",
+        "verified": true,
+        "details": [
+          "taskset constrained process to cpu set 0"
+        ]
+      },
+      "symmetric": true,
+      "claimable": true
+    }
+  ],
+  "execution_schedule": [
+    {
+      "round": 1,
+      "phase": "warmup",
+      "order": [
+        "baseline",
+        "rewrite"
+      ]
+    },
+    {
+      "round": 2,
+      "phase": "measured",
+      "order": [
+        "rewrite",
+        "baseline"
+      ]
+    },
+    {
+      "round": 3,
+      "phase": "measured",
+      "order": [
+        "baseline",
+        "rewrite"
+      ]
+    }
+  ]
+}
