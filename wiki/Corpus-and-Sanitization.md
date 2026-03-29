@@ -1,42 +1,32 @@
 # Corpus and sanitization
 
-## Data sources
+## Synthetic corpus
 
-### Synthetic corpora
+The representative synthetic fixture in the current public bundle is `benchmark/corpora/synthetic/small/access.log`. Its committed manifest at `evidence/benchmark-homelab-20260328/synthetic-small/manifest.json` records corpus hash `cfb8103d89c4bb1cb69732e643177357e3bae1faf0a9cd304c2fb4966e52540d`, `335` input bytes, and the declared `format=combined` / `profile=default` settings.
 
-Generated log files with known properties: fixed line counts, controlled format variation, and deterministic content. These serve as ground truth for correctness testing and baseline performance measurement.
+## Homelab-derived corpus
 
-### Homelab sources
+The current public homelab-backed corpus is `benchmark/corpora/homelab/jellyfin-illustrative/access.log`. It is not a raw capture. It is a sanitized combined-log derivative whose hash is `27d75747c984391a52fba754c8f9bde1cc83cb6626d6832236fbd5378c0a9a87`, matching the manifest and index entries under `evidence/benchmark-homelab-20260328/`.
 
-Real-world validation uses anonymized Caddy access logs from internal infrastructure. The primary source is the Caddy reverse proxy handling production-like traffic.
+## What changed during sanitization
 
-## Sanitization requirements
+`benchmark/corpora/homelab/jellyfin-illustrative/redaction-report.json` records four concrete transformations:
 
-Before any real log data enters a publishable bundle:
+- host prefix removal
+- client IP pseudonymization into documentation ranges
+- path-token pseudonymization to `session-a` and `session-b`
+- projection into parser-compatible combined-log lines
 
-- Client IP addresses removed or pseudonymized
-- Cookies and authorization headers stripped
-- Query-string secrets redacted
-- Referrer URLs sanitized
-- User-agent tokens that could identify internal systems removed
-- Internal-only hostnames and paths generalized
+The report also records `line_count_before = 18`, `line_count_after = 18`, and `structure_preserved = true`.
 
-## Redaction reporting
+## What never enters git
 
-Each sanitized corpus carries a redaction report documenting:
+- raw unsanitized log slices
+- cookies or authorization headers
+- query-string secrets
+- internal-only hostnames or paths copied verbatim from source systems
+- ad hoc temp output from benchmark runs
 
-- What fields were removed or transformed
-- Hash of the original corpus (for internal traceability)
-- Hash of the sanitized corpus (for evidence bundle reference)
-- Any edge cases or manual review steps
+## Why the current homelab corpus is labeled illustrative
 
-## What we never commit
-
-- Raw unsanitized logs
-- Production credentials or tokens
-- Internal network details or hostnames
-- Session identifiers or cookie values
-
-## Corpus provenance
-
-Synthetic fixtures are checked into the repository. Sanitized homelab corpora are tracked by hash in benchmark manifests. The original unsanitized sources remain in their source systems and are never copied to development or publication repositories.
+The scenario file `benchmark/scenarios/homelab-jellyfin-illustrative.json` and the public index both mark this corpus as illustrative. It proves the benchmark and service can agree on a real sanitized slice, but it is still a fallback media-service window rather than a broad ingress sample.

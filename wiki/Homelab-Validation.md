@@ -1,82 +1,37 @@
 # Homelab validation
 
-This page documents how the Go implementation is validated against real-world traffic in the homelab environment.
+The current committed homelab-backed proof is the scenario `homelab-jellyfin-illustrative`. It is a bounded, sanitized retry window that was used in three places at once: the benchmark bundle, the API submission flow, and the browser-visible report surface.
 
-## Validation approach
+## What the committed cross-check proves
 
-Homelab validation complements synthetic benchmarks by testing the implementation against production-like traffic patterns. The validation focuses on correctness, resource usage, and integration with existing infrastructure.
+`evidence/benchmark-homelab-20260328/homelab-jellyfin-illustrative/service-integration/cross-check.json` ties one sanitized corpus hash to:
 
-## Data source
+- benchmark summary values
+- API job id `job_1774742902_48035203`
+- report URL `/reports/job_1774742902_48035203`
+- visible report metrics and ranked request rows
 
-The primary validation corpus comes from Caddy reverse proxy access logs. These logs represent actual web traffic patterns including:
+That file records `matches: true`, `requests_total: 18`, `matched_lines: 18`, and the same ranked order in both the benchmark summary and the service summary.
 
-- Mixed HTTP methods (GET, POST, PUT, DELETE)
-- Range of response codes (2xx success, 3xx redirects, 4xx client errors, 5xx server errors)
-- Varied request paths and query parameters
-- Diverse user-agent strings
-- Realistic traffic timing and volume patterns
+## Visible ranking in the committed run
 
-## Anonymization pipeline
+The same cross-check file records two ranked request rows:
 
-Before any homelab data enters the validation workflow, it passes through a sanitization pipeline:
+1. `GET /videos/session-a/live.m3u8` with count `12`
+2. `GET /videos/session-b/live.m3u8` with count `6`
 
-1. Client IPs are pseudonymized to RFC 5737 documentation ranges
-2. Cookies and authorization headers are removed entirely
-3. Query-string parameters containing tokens or identifiers are redacted
-4. Referrer URLs are truncated to origin only
-5. User-agent strings are simplified to browser family and version
-6. Internal hostnames are replaced with generic placeholders
+That matters because it shows the benchmark path and the live service path agree on ordering, not just on totals.
 
-## Validation scenarios
+## Sanitization boundary
 
-### Correctness validation
+The publishable corpus and the publishable evidence copy both point back to the same anonymized source story:
 
-The Go implementation is run against anonymized homelab logs and its output compared against the expected structure. Key checks include:
+- `benchmark/corpora/homelab/jellyfin-illustrative/redaction-report.json`
+- `evidence/benchmark-homelab-20260328/homelab-jellyfin-illustrative/redaction/report.json`
+- `evidence/benchmark-homelab-20260328/homelab-jellyfin-illustrative/redaction/scan.json`
 
-- Total request counts match input line counts
-- Response code distributions are plausible
-- Top-requested paths are extracted and ranked
-- Timing metrics fall within expected ranges
-- Error handling for malformed lines is consistent
+Those files record the bounded capture window, pseudonymized client addresses, rewritten path tokens, and an empty forbidden-match scan.
 
-### Resource validation
+## Limits
 
-Memory and CPU usage are monitored during homelab validation runs:
-
-- Peak memory usage under sustained load
-- CPU time per thousand log lines
-- Garbage collection frequency and pause times
-- File descriptor usage patterns
-
-### Integration validation
-
-The validation includes testing the service deployment model:
-
-- Service startup and shutdown behavior
-- Health and readiness endpoint responses
-- Concurrent request handling
-- Report generation and retrieval
-- Job lifecycle management (queued, running, completed, expired)
-
-## Validation environment
-
-The homelab validation runs on actual infrastructure:
-
-- Target host: ansible (172.16.1.9)
-- Log source: Caddy access logs from caddy (172.16.1.21)
-- Deployment: Containerized Go service
-- Monitoring: Native service metrics and system resource tracking
-
-## Expected outcomes
-
-A successful homelab validation demonstrates:
-
-- Correct parsing of real-world log formats
-- Stable resource usage without memory leaks
-- Consistent performance across varied traffic patterns
-- Proper handling of edge cases found in production traffic
-- Clean integration with homelab deployment patterns
-
-## Status
-
-Awaiting service completion and homelab deployment readiness. Validation results and evidence bundles will be linked from the evidence index as they become available.
+This is still an illustrative fallback slice, not the final representative ingress dataset. The public result set proves the end-to-end path on sanitized homelab traffic. It does not claim that one short media-service retry window captures every production pattern the parser will ever see.

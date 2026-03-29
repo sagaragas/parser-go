@@ -1,9 +1,9 @@
 ## Pages
 
-- [Home](./Home)
-- [Clean room and legal](./Clean-Room-and-Legal)
-- [Architecture](./Architecture)
-- [Benchmark methodology](./Benchmark-Methodology)
-- [Corpus and sanitization](./Corpus-and-Sanitization)
-- [Homelab validation](./Homelab-Validation)
-- [Evidence index](./Evidence-Index)
+- [Home](./Home.md)
+- [Clean room and legal](./Clean-Room-and-Legal.md)
+- [Architecture](./Architecture.md)
+- [Benchmark methodology](./Benchmark-Methodology.md)
+- [Corpus and sanitization](./Corpus-and-Sanitization.md)
+- [Homelab validation](./Homelab-Validation.md)
+- [Evidence index](./Evidence-Index.md)

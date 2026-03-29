@@ -1,44 +1,42 @@
 # Architecture
 
-## System overview
+## Runtime shape
 
-The parser is a single-purpose log analysis system centered on a long-running Go service. It accepts log files, analyzes them asynchronously, and produces both machine-readable summaries and self-contained HTML reports.
+The shipped product is still intentionally small. `cmd/parsergo/main.go` starts one HTTP server, wires `internal/api/analysis_handler.go` and `internal/api/report_handler.go`, and keeps job state in the in-process store from `internal/job/job.go`. There is no external database, broker, or remote asset dependency in the runtime path.
 
-## Core components
+## Main code paths
 
-### Service API
+### Service entrypoint
 
-The HTTP control plane handles liveness and readiness checks, accepts analysis submissions, exposes job status polling, and serves completed results. It validates requests, enforces limits, and returns structured errors for client mistakes.
+`cmd/parsergo/main.go` owns process startup, readiness, and shutdown. It reads `PARSERGO_ADDR`, starts the HTTP listener, and registers the analysis and report routes on a single `http.ServeMux`.
 
 ### Analysis engine
 
-The core value path ingests log data, parses a deliberately narrow set of formats, normalizes records into a canonical internal model, and computes metrics and ranked outputs. Unsupported inputs fail explicitly. The engine streams data to bound memory use and produces deterministic results.
+`internal/analysis/engine.go` is the parser and aggregation core. It accepts the currently declared `format=combined` surface, streams the input, and returns the canonical totals and ranked request list that later surfaces reuse.
 
-### Job lifecycle
+### Job lifecycle and storage
 
-Analysis runs asynchronously. The job layer tracks work through queued, running, succeeded, failed, and expired states. It enforces queue limits, handles duplicate submissions safely, and manages retention. Workspaces are server-controlled: client filenames cannot steer filesystem layout.
+`internal/job/job.go` tracks queued, running, succeeded, failed, and expired analyses. The API handlers update that store directly, which keeps the contract simple and makes the job state easy to cross-check in tests.
 
-### Report generation
+### Report surface
 
-Completed analyses produce self-contained HTML reports and a browsable index. Reports display the same metrics and rankings as the canonical summary, using only local assets with no third-party network dependence.
+`internal/api/report_handler.go` serves `/reports` and `/reports/{id}` from the stored analysis results. The report surface is a presentation layer only. It renders the same totals and ranking order the canonical summary already computed.
 
 ### Benchmark harness
 
-A separate subsystem runs the Go rewrite and legacy Python baseline against identical corpora. It normalizes outputs, enforces parity gates, records iteration-level metrics, and emits publishable result bundles.
+`cmd/bench/main.go` and `internal/bench/` run the legacy Python baseline and the Go rewrite against the same declared scenario files in `benchmark/scenarios/`. The committed evidence bundle under `evidence/benchmark-homelab-20260328/` comes from that harness.
 
 ## Data flow
 
-1. Client submits analysis request via HTTP
-2. Service validates and creates a job with opaque server-controlled identity
-3. Engine parses input, normalizes records, computes aggregates
-4. System writes canonical summary and self-contained report
-5. Service exposes job state, summary JSON, and report HTML
-6. Failed jobs surface sanitized errors without stack traces or path leaks
-7. Expired resources return explicit responses rather than silent disappearance
+1. A client submits a log corpus to `POST /v1/analyses`.
+2. `internal/api/analysis_handler.go` validates the request and creates a server-owned job id.
+3. `internal/analysis/engine.go` parses the corpus and computes the canonical summary.
+4. The API stores the finished summary, exposes it at `/v1/analyses/{id}/summary`, and makes the matching report visible at `/reports/{id}`.
+5. `cmd/bench/main.go` can run the same corpus through the benchmark harness so the summary, parity artifacts, and report-visible values stay traceable to one scenario id.
 
-## Key invariants
+## Design rules that stay fixed
 
-- Safety over convenience: client-controlled inputs cannot escape workspace boundaries
-- Determinism: identical input produces identical output and stable ranking order
-- Self-containment: reports render offline with no external network requests
-- Parity before speed: benchmark claims require workload accounting and output correctness
+- Client filenames and paths do not choose where files land on disk.
+- The canonical summary is the source of truth for API responses, reports, and benchmark parity.
+- Reports stay self-contained. No CDN scripts, remote fonts, or late third-party fetches.
+- Performance claims only count when the parity artifacts under `evidence/benchmark-homelab-20260328/*/parity/` say the rewrite and baseline did the same work.

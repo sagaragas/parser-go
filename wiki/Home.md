@@ -1,24 +1,21 @@
-# Web Log Parser (Go)
+# parsergo wiki
 
-A clean-room Go rewrite of a legacy Python log analysis tool, built for speed, safety, and long-running service use.
+parsergo is a clean-room Go rewrite of a legacy Python web log parser. The current public evidence set lives in `evidence/benchmark-homelab-20260328/` and is pinned to rewrite revision `dc01cf104ef86c2d3a755b84bcae1203e1a4b15d`, as recorded in `evidence/benchmark-homelab-20260328/index.json`.
 
-## What this is
+## Start here
 
-This repository contains a from-scratch Go implementation that analyzes web server access logs. The project was built using clean-room techniques: the legacy tool was studied for behavioral reference only, with no code, prose, or assets copied.
+- [Clean room and legal](./Clean-Room-and-Legal.md) explains the licensing posture, the clean-room boundary, and why the repo ships Apache-2.0.
+- [Architecture](./Architecture.md) maps the runtime pieces to the actual source tree.
+- [Benchmark methodology](./Benchmark-Methodology.md) describes the committed scenarios, fairness controls, parity gate, and limits of the current results.
+- [Corpus and sanitization](./Corpus-and-Sanitization.md) explains which corpora are synthetic, which one is homelab-derived, and how the publishable corpus was redacted.
+- [Homelab validation](./Homelab-Validation.md) covers the same-run benchmark-to-service cross-check for the committed homelab scenario.
+- [Evidence index](./Evidence-Index.md) is the shortest path to manifests, parity diffs, aggregate summaries, and redaction reports.
 
-## Quick links
+## What is already measured
 
-- [Clean room and legal](./Clean-Room-and-Legal.md) - How we kept this rewrite ethical and safe to publish
-- [Architecture](./Architecture.md) - How the system is organized
-- [Benchmark methodology](./Benchmark-Methodology.md) - How we measure correctness and performance
-- [Corpus and sanitization](./Corpus-and-Sanitization.md) - Where our test data comes from and how we keep it safe to share
-- [Homelab validation](./Homelab-Validation.md) - How we test against real-world traffic in the homelab
-- [Evidence index](./Evidence-Index.md) - Links to measured results and benchmark bundles
+- `synthetic-small` is the representative synthetic fixture in the committed bundle. Its manifest, parity results, and aggregate summary live under `evidence/benchmark-homelab-20260328/synthetic-small/`.
+- `homelab-jellyfin-illustrative` is the current sanitized homelab-backed scenario. It is explicitly marked illustrative in `evidence/benchmark-homelab-20260328/index.json`, and its same-run benchmark-to-service comparison lives at `evidence/benchmark-homelab-20260328/homelab-jellyfin-illustrative/service-integration/cross-check.json`.
 
-## Project status
+## How to read this wiki
 
-This is an active rewrite project. The wiki will fill in as implementation milestones complete and evidence becomes available.
-
-## License
-
-The Go implementation and all original content in this repository are released under the Apache License 2.0.
+Start with the legal and methodology pages if you need the publication boundary first. Start with the architecture page if you want the code layout. If you only need the measured artifacts, go straight to the evidence index and follow the bundle paths from there.

@@ -1,71 +1,44 @@
 # Benchmark methodology
 
-## Goals
+The benchmark harness compares the legacy Python baseline and the Go rewrite on the same declared input, then refuses to make a performance claim unless parity passes first. The current committed evidence set is `evidence/benchmark-homelab-20260328/`.
 
-- Prove correctness before claiming performance wins
-- Compare Go rewrite against legacy Python baseline on identical inputs
-- Produce reproducible, publishable evidence bundles
+## Committed scenarios
 
-## Scenario classes
+| scenario id | kind | representation | manifest | aggregate summary |
+| --- | --- | --- | --- | --- |
+| `synthetic-small` | synthetic | representative | `evidence/benchmark-homelab-20260328/synthetic-small/manifest.json` | `evidence/benchmark-homelab-20260328/synthetic-small/parity/aggregate-summary.json` |
+| `homelab-jellyfin-illustrative` | homelab | illustrative | `evidence/benchmark-homelab-20260328/homelab-jellyfin-illustrative/manifest.json` | `evidence/benchmark-homelab-20260328/homelab-jellyfin-illustrative/parity/aggregate-summary.json` |
 
-We run benchmarks across several corpus types:
+Both manifests pin the rewrite to `dc01cf104ef86c2d3a755b84bcae1203e1a4b15d` and the baseline to `904f838ddce5defc8715f2e444063520b7b0d612`.
 
-- Synthetic small corpus - sanity check for basic correctness
-- Synthetic medium corpus - representative single-file workload
-- Synthetic large corpus - stress test for memory and throughput
-- Multi-file corpus - rotated log handling
-- Anonymized homelab corpus - real-world validation
+## Fairness controls in the committed bundle
 
-## Fairness rules
+The two committed manifests use the same declared controls:
 
-Both implementations run under identical conditions:
+- `warmup_iterations = 1`
+- `measured_iterations = 2`
+- `cache_posture = "cold"`
+- `concurrency = 1`
+- `max_procs = 1`
 
-- Same input bytes, same declared settings
-- Fresh temp workspace per timed run to avoid stale artifacts
-- Dependency installation and one-time build costs excluded from timing
-- Warmup policy, cache state, iteration count, and thread settings recorded symmetrically
+The matching proof lives in each manifest's `fairness.control_evidence` block and in the copied `fairness.json` file beside it.
 
-## Parity gates
+## What has to match before timing matters
 
-Before any performance comparison:
+For each scenario, the harness writes:
 
-- Canonical summaries must match field-for-field
-- Workload accounting (bytes, lines, matched, filtered, output rows) must agree
-- Any mismatch blocks the speed claim until investigated
+- a canonical summary for the baseline and the rewrite
+- workload accounting for input bytes, total lines, matched lines, filtered lines, rejected lines, and output row count
+- a parity record under `parity/parity.json`
 
-## Iteration and metrics
+If any tracked field drifts, the run is not claimable. The published index currently marks both committed scenarios as `parity_passed: true` in `evidence/benchmark-homelab-20260328/index.json`.
 
-Each scenario runs multiple iterations. We capture:
+## What gets published
 
-- Wall time per iteration
-- CPU time per iteration
-- Maximum resident set size (RSS)
+Each publishable bundle includes the manifest, fairness proof, normalized summaries, workload accounting, raw timing metrics, aggregate summary, and sanitized environment snapshot. The homelab bundle also carries `redaction/report.json`, `redaction/scan.json`, and the same-run service cross-check at `service-integration/cross-check.json`.
 
-Aggregates report median, mean, and spread where applicable.
+## Limits of the current result set
 
-## Publishable bundles
-
-A complete benchmark bundle contains:
-
-- Scenario manifest with corpus, revisions, settings, environment
-- Canonical normalized summaries for baseline and rewrite
-- Workload accounting artifacts
-- Raw per-iteration metrics
-- Aggregate summaries
-- Sanitized environment snapshot
-- Anonymization report when homelab data is involved
-- Claim-to-evidence index for traceability
-
-Bundles exclude raw logs, temp files, caches, and machine-local secrets.
-
-## Limitations and honesty
-
-We disclose:
-
-- Measured revisions and commit identifiers
-- Corpus source and sanitization steps
-- Host hardware, OS, and runtime versions
-- Sample counts and statistical spread
-- Whether homelab scenarios are illustrative or representative
-
-This lets readers judge what the benchmark actually proves.
+- The committed homelab-backed scenario is `homelab-jellyfin-illustrative`. It is useful because it proves the end-to-end path on real sanitized traffic, but it is still labeled illustrative rather than representative.
+- The parser currently benchmarks `format=combined` only, so non-combined raw captures have to be sanitized and projected before they can enter a scenario.
+- The current public wiki points readers to the measured artifacts. It does not treat the two-scenario bundle as the final word on every workload shape.

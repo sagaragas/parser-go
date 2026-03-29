@@ -1,42 +1,36 @@
 # Clean room and legal
 
-## The clean-room boundary
+## Plain statement
 
-This Go implementation was built using clean-room software engineering practices. The upstream Python tool served only as behavioral reference during initial research. No code, README text, templates, screenshots, or other assets were copied from the original repository.
+The legacy Python repository was used as read-only research input. This repo does not copy upstream code, README text, report templates, screenshots, or other assets. The Go implementation, the wiki prose, and the committed benchmark evidence were written independently for this mission.
 
-## Why clean-room matters
+## Why the boundary matters
 
-The legacy project appears to lack a clear license grant. To ensure this rewrite can be published safely:
+The upstream project does not provide a clear license grant. That makes a line-by-line or asset-for-asset reuse story a bad idea. The safer path was to study behavior, restate requirements in original words, and build a new implementation that can be published on its own terms.
 
-- All implementation decisions were made independently
-- All prose in this wiki and related articles is original
-- No mechanical translation of Python logic into Go
-- The original repository remains read-only reference material
+## What counted as allowed input
 
-## What we did study
+- Behavioral observations from the legacy tool
+- Original code and tests in this repo
+- Benchmark artifacts produced by this repo's own harness
+- Sanitized corpora and redaction reports committed under `benchmark/` and `evidence/`
 
-- Behavioral observations: what inputs the tool accepts, what outputs it produces
-- Performance characteristics for benchmark comparison purposes
-- Format and profile support as a baseline for declaring our own surface
+## What stayed out
 
-## What we did not copy
+- Upstream source code
+- Upstream documentation prose
+- Upstream templates, screenshots, or report assets
+- Raw homelab logs
+- Mission-only infrastructure such as `.factory/` in the generated public release candidate
 
-- Source code
-- Documentation or tutorial text
-- Configuration schemas or templates
-- Report HTML or styling
-- Test fixtures or example data
+## Licensing
 
-## License
-
-This Go implementation and all original content are released under:
-
-**Apache License, Version 2.0**
-
-See the LICENSE file at the repository root for the full text.
+This repository now ships the full Apache License 2.0 text in the root `LICENSE` file. That applies to the original Go implementation and the original documentation written in this repo.
 
 ## Publication safety
 
-- No private logs or credentials appear in committed evidence
-- All real-world corpora are anonymized before entering publishable bundles
-- The release-candidate tree excludes mission infrastructure and temporary artifacts
+The public-facing corpus story is backed by committed redaction records, not by trust alone:
+
+- `benchmark/corpora/homelab/jellyfin-illustrative/redaction-report.json` records the source label, bounded capture window, and the projection into sanitized combined-log lines.
+- `evidence/benchmark-homelab-20260328/homelab-jellyfin-illustrative/redaction/report.json` and `redaction/scan.json` show the publishable bundle copy and the empty forbidden-match scan.
+- `go run ./cmd/releasecandidate` generates a public release-candidate tree and archive that exclude `.factory/`, `HOMELAB_LOG_SOURCES.md`, local toolchains, and benchmark runtime output.
