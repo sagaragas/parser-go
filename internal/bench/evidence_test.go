@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -422,7 +423,7 @@ func TestPublishEvidenceSetSanitizesCrossCheckAndPropagatesRewriteRevision(t *te
 			Architecture:  "amd64",
 			Kernel:        "6.8.0-bench-test",
 			CPUModel:      "Synthetic Benchmark CPU",
-			LogicalCores:  12,
+			LogicalCores:  runtime.NumCPU(),
 			TotalRAMBytes: 48 * 1024 * 1024 * 1024,
 			GoVersion:     "go version go1.26.0 linux/amd64",
 			PythonVersion: "Python 3.11.2",

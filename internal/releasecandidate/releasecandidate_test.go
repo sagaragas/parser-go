@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -145,6 +146,7 @@ func TestGenerateProducesPublishablePaths(t *testing.T) {
 	assertSanitizedBenchmarkEvidenceFile(t, filepath.Join(treeRoot, "evidence", "benchmark-homelab-20260328", "synthetic-small", "environment", "snapshot.json"), rawHostLiterals)
 	assertSanitizedBenchmarkEvidenceFile(t, filepath.Join(treeRoot, "evidence", "benchmark-homelab-20260328", "homelab-jellyfin-illustrative", "manifest.json"), rawHostLiterals)
 	assertSanitizedBenchmarkEvidenceFile(t, filepath.Join(treeRoot, "evidence", "benchmark-homelab-20260328", "homelab-jellyfin-illustrative", "environment", "snapshot.json"), rawHostLiterals)
+	assertReleaseTreeExcludesRawLogicalCoreCount(t, filepath.Join(treeRoot, "internal", "bench", "evidence_test.go"), benchmarkHostLogicalCoreCounts(t, repoRoot))
 
 	scenarioDir := filepath.Join(treeRoot, "benchmark", "scenarios")
 	entries, err := os.ReadDir(scenarioDir)
@@ -383,6 +385,7 @@ func benchmarkHostFingerprintLiterals(t *testing.T, repoRoot string) []string {
 	type hostFields struct {
 		Kernel        string `json:"kernel"`
 		CPUModel      string `json:"cpu_model"`
+		LogicalCores  int    `json:"logical_cores"`
 		TotalRAMBytes uint64 `json:"total_ram_bytes"`
 	}
 
@@ -393,6 +396,9 @@ func benchmarkHostFingerprintLiterals(t *testing.T, repoRoot string) []string {
 		}
 		if fields.CPUModel != "" {
 			literals[fields.CPUModel] = struct{}{}
+		}
+		if fields.LogicalCores > 0 {
+			literals[jsonFieldValueLiteral("logical_cores", strconv.Itoa(fields.LogicalCores))] = struct{}{}
 		}
 		if fields.TotalRAMBytes != 0 {
 			literals[strconv.FormatUint(fields.TotalRAMBytes, 10)] = struct{}{}
@@ -440,6 +446,61 @@ func benchmarkHostFingerprintLiterals(t *testing.T, repoRoot string) []string {
 	return values
 }
 
+func benchmarkHostLogicalCoreCounts(t *testing.T, repoRoot string) []string {
+	t.Helper()
+
+	type hostFields struct {
+		LogicalCores int `json:"logical_cores"`
+	}
+
+	counts := map[string]struct{}{}
+	addFields := func(fields hostFields) {
+		if fields.LogicalCores > 0 {
+			counts[strconv.Itoa(fields.LogicalCores)] = struct{}{}
+		}
+	}
+
+	readJSON := func(rel string, target any) {
+		t.Helper()
+
+		path := filepath.Join(repoRoot, filepath.FromSlash(rel))
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read source evidence file %q: %v", rel, err)
+		}
+		if err := json.Unmarshal(data, target); err != nil {
+			t.Fatalf("decode source evidence file %q: %v", rel, err)
+		}
+	}
+
+	for _, rel := range []string{
+		"evidence/benchmark-homelab-20260328/synthetic-small/environment/snapshot.json",
+		"evidence/benchmark-homelab-20260328/homelab-jellyfin-illustrative/environment/snapshot.json",
+	} {
+		var host hostFields
+		readJSON(rel, &host)
+		addFields(host)
+	}
+
+	for _, rel := range []string{
+		"evidence/benchmark-homelab-20260328/synthetic-small/manifest.json",
+		"evidence/benchmark-homelab-20260328/homelab-jellyfin-illustrative/manifest.json",
+	} {
+		var manifest struct {
+			Host hostFields `json:"host"`
+		}
+		readJSON(rel, &manifest)
+		addFields(manifest.Host)
+	}
+
+	values := make([]string, 0, len(counts))
+	for value := range counts {
+		values = append(values, value)
+	}
+	sort.Strings(values)
+	return values
+}
+
 func assertSanitizedBenchmarkEvidenceFile(t *testing.T, path string, rawHostLiterals []string) {
 	t.Helper()
 
@@ -474,6 +535,32 @@ func assertSanitizedBenchmarkEvidenceFile(t *testing.T, path string, rawHostLite
 	}
 }
 
+func assertReleaseTreeExcludesRawLogicalCoreCount(t *testing.T, path string, logicalCoreCounts []string) {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read generated release-tree source file %q: %v", path, err)
+	}
+
+	text := string(data)
+	for _, logicalCoreCount := range logicalCoreCounts {
+		jsonLiteral := jsonFieldValueLiteral("logical_cores", logicalCoreCount)
+		if strings.Contains(text, jsonLiteral) {
+			t.Fatalf("release-tree source file %q still leaks raw logical core-count literal %q", path, jsonLiteral)
+		}
+
+		structLiteralPattern := regexp.MustCompile(`\bLogicalCores:\s*` + regexp.QuoteMeta(logicalCoreCount) + `\b`)
+		if match := structLiteralPattern.FindString(text); match != "" {
+			t.Fatalf("release-tree source file %q still leaks raw logical core-count source literal %q", path, match)
+		}
+	}
+}
+
 func jsonFieldLiteral(key string) string {
 	return `"` + key + `":`
+}
+
+func jsonFieldValueLiteral(key, value string) string {
+	return `"` + key + `": ` + value
 }
